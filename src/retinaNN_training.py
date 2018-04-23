@@ -94,11 +94,9 @@ def main():
     patches_imgs_train, patches_masks_train = get_data_training(
         DRIVE_train_imgs_original=path_data + config.get('data paths', 'train_imgs_original').replace("DRIVE", dataset),
         DRIVE_train_groudTruth=path_data + config.get('data paths', 'train_groundTruth').replace("DRIVE", dataset),
-        # masks
         patch_height=int(config.get('data attributes', 'patch_height')),
         patch_width=int(config.get('data attributes', 'patch_width')),
         N_subimgs=int(config.get('training settings', 'N_subimgs')),
-        inside_FOV=config.getboolean('training settings', 'inside_FOV'),
         # select the patches only inside the FOV  (default == True))
         color_channel=int(config.get('public', 'color_channel')),
         train_coordinate=path_data + "/" + config.get('data paths', 'train_coordinate').replace("DRIVE", dataset))

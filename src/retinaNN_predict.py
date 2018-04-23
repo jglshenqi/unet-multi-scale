@@ -102,7 +102,7 @@ def get_pred_patches(patches_imgs_test):
     return pred
 
 
-def visualized(patches_imgs_test, patches_masks_test, pred_patches, masks_test, new_height, new_width, number, counter):
+def visualized(patches_imgs_test, test_mask, pred_patches, test_groundtruth, new_height, new_width, number, counter):
     new_path_experiment = path_experiment + str(number) + "/"
     # ========== Elaborate and visualize the predicted images ====================
     test_imgs_orig = load_hdf5(DRIVE_test_imgs_original)
@@ -111,15 +111,18 @@ def visualized(patches_imgs_test, patches_masks_test, pred_patches, masks_test, 
     if average_mode == True:
         pred_imgs = recompone_overlap(pred_patches, new_height, new_width, stride_height, stride_width)  # predictions
         orig_imgs = my_PreProc(test_imgs_orig[counter:counter + 1, :, :, :])  # originals
-        gtruth_masks = masks_test  # ground truth masks
+        gtruth_masks = test_groundtruth  # ground truth masks
     else:
         pred_imgs = recompone(pred_patches, 13, 12)  # predictions
         orig_imgs = recompone(patches_imgs_test, 13, 12)  # originals
-        gtruth_masks = recompone(patches_masks_test, 13, 12)  # masks
+        gtruth_masks = recompone(test_mask, 13, 12)  # masks
+
 
     orig_imgs = orig_imgs[:, :, 0:full_img_height, 0:full_img_width]
     pred_imgs = pred_imgs[:, :, 0:full_img_height, 0:full_img_width]
     pred_img = pred_imgs
+    print(np.shape(pred_imgs),np.shape(test_mask),np.max(test_mask),np.min(test_mask))
+    pred_imgs = np.array(list(map(lambda x: x[0] * x[1], zip(pred_imgs, test_mask))))
 
     threshold = float(config.get("testing settings", "vi_threshold"))
     if threshold:
@@ -231,7 +234,7 @@ def F1_s(y_true, y_pred):
     return F1_score
 
 
-def evaluate(y_true, y_scores, number=0, i=0):
+def evaluate(y_true, y_scores, number=0, i=0, result=[]):
     AUC_ROC = evaluate_roc(y_true, y_scores, number, i)
     AUC_prec_rec = evaluate_prc(y_true, y_scores, number, i)
     confusion, y_pred, accuracy, specificity, sensitivity, precision = confusion_matrixd(y_true, y_scores)
@@ -253,8 +256,23 @@ def evaluate(y_true, y_scores, number=0, i=0):
                     )
     file_perf.close()
 
+    result[number][0] = result[number][0] + AUC_ROC
+    result[number][1] = result[number][1] + AUC_prec_rec
+    result[number][2] = result[number][2] + jaccard_index
+    result[number][3] = result[number][3] + F1_score
 
-def main(round):
+    file_perf = open(path_experiment + '/%d/performances_all.txt' % number, 'w')
+    file_perf.write("Area under the ROC curve: " + str(result[number][0])
+                    + "\nArea under Precision-Recall curve: " + str(result[number][1])
+                    + "\nJaccard similarity score: " + str(result[number][2])
+                    + "\nF1 score (F-measure): " + str(result[number][3])
+                    )
+    file_perf.close()
+
+    return result
+
+
+def main(round, result):
     patches_imgs_test = None
     new_height = None
     new_width = None
@@ -270,12 +288,13 @@ def main(round):
     for i in range(round * full_images_to_test, (round + 1) * full_images_to_test):
         print("\n===============the %d/%d round===============" % (i, (round + 1) * full_images_to_test))
         if average_mode == True:
-            patches_imgs_test, new_height, new_width, masks_test = get_data_testing_overlap(
+            patches_imgs_test, new_height, new_width, test_groundtruth, test_mask = get_data_testing_overlap(
                 DRIVE_test_imgs_original=DRIVE_test_imgs_original,  # original
                 DRIVE_test_groudTruth=path_data + config.get('data paths', 'test_groundTruth').replace("DRIVE",
                                                                                                        dataset),
                 # masks
-                Imgs_to_test=int(config.get(dataset, 'full_images_to_test')),
+                DRIVE_test_mask=path_data + config.get('data paths', 'test_border_masks').replace("DRIVE",
+                                                                                                       dataset),
                 patch_height=patch_height,
                 patch_width=patch_width,
                 stride_height=stride_height,
@@ -304,7 +323,7 @@ def main(round):
             else:
                 pred_patches = predicision[j]
 
-            pred_imgs, gtruth_masks = visualized(patches_imgs_test, patches_masks_test, pred_patches, masks_test,
+            pred_imgs, gtruth_masks = visualized(patches_imgs_test, test_mask, pred_patches, test_groundtruth,
                                                  new_height, new_width, number, i)
 
             score, true = pred_only_FOV(pred_imgs, gtruth_masks)  # returns data only inside the FOV
@@ -325,9 +344,14 @@ def main(round):
 
     for i in range(num_of_loss):
         number = i
-        evaluate(y_trues[:, i:i + 1], y_scores[:, i:i + 1], number, round)
+        result = evaluate(y_trues[:, i:i + 1], y_scores[:, i:i + 1], number, round, result)
+
+    return result
 
 
 if __name__ == '__main__':
+    result = []
+    for i in range(num_of_loss):
+        result.append([0, 0, 0, 0])
     for i in range(part):
-        main(i)
+        result = main(i, result)
