@@ -2,7 +2,9 @@
 import configparser
 # Keras
 import os
+import tensorflow as tf
 from keras.models import model_from_json
+# from keras import backend as K
 from keras.models import Model
 # scikit learn
 from sklearn.metrics import roc_curve
@@ -13,21 +15,15 @@ from sklearn.metrics import jaccard_similarity_score
 from sklearn.metrics import f1_score
 import sys
 import gc
+import time
 
 # help_functions.py
 from help_functions import *
-# extract_patches.py
-from extract_patches import recompone
-from extract_patches import recompone_overlap
-from extract_patches import paint_border
-from extract_patches import kill_border
-from extract_patches import pred_only_FOV
-from extract_patches import get_data_testing
-from extract_patches import get_data_testing_overlap
+from extract_patches import *
 # pre_processing.py
 from pre_processing import my_PreProc
 import keras.backend.tensorflow_backend as KTF
-import tensorflow as tf
+
 
 plt.switch_backend('agg')
 sys.path.insert(0, './lib/')
@@ -36,6 +32,9 @@ sys.path.insert(0, './lib/')
 config = configparser.RawConfigParser()
 config.read('./configuration.txt')
 # ===========================================
+GPU = str(config.get('public', 'GPU'))
+os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
+os.environ["CUDA_VISIBLE_DEVICES"] = GPU
 # run the training on invariant or local
 dataset = config.get('public', 'dataset')
 path_data = config.get('data paths', 'path_local').replace("DRIVE", dataset)
@@ -60,7 +59,7 @@ path_experiment = './' + name_experiment + '/'
 # Grouping of the predicted images
 N_visual = int(config.get('testing settings', 'N_group_visual'))
 # ====== average mode ===========
-net_name = config.get('public', 'network')
+net_name = config.get('public', 'net_config')
 average_mode = config.getboolean('testing settings', 'average_mode')
 num_of_loss = int(config.get(net_name, 'num_of_loss'))
 masks_original = int(config.get(net_name, 'mask_original'))
@@ -68,6 +67,17 @@ softmax = int(config.get(net_name, 'softmax'))
 part = int(config.get(dataset, "part"))
 full_images_to_test = int(full_images_to_test / part)
 type_of_output = int(config.get(net_name, 'type_of_output'))
+color_range_g = int(config.get('public', 'color_range_g'))
+
+GPU = str(config.get('public', 'GPU'))
+os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
+os.environ["CUDA_VISIBLE_DEVICES"] = GPU
+
+print("Using GPU ", GPU)
+
+
+# K.clear_session()
+
 if type_of_output == 1:
     num_of_loss = 1
 
@@ -117,19 +127,24 @@ def visualized(patches_imgs_test, test_mask, pred_patches, test_groundtruth, new
         orig_imgs = recompone(patches_imgs_test, 13, 12)  # originals
         gtruth_masks = recompone(test_mask, 13, 12)  # masks
 
-
     orig_imgs = orig_imgs[:, :, 0:full_img_height, 0:full_img_width]
     pred_imgs = pred_imgs[:, :, 0:full_img_height, 0:full_img_width]
-    pred_img = pred_imgs
-    print(np.shape(pred_imgs),np.shape(test_mask),np.max(test_mask),np.min(test_mask))
-    pred_imgs = np.array(list(map(lambda x: x[0] * x[1], zip(pred_imgs, test_mask))))
 
-    threshold = float(config.get("testing settings", "vi_threshold"))
-    if threshold:
-        print("\nvisualized:  Costum threshold (for positive) of " + str(threshold))
+    # print(np.shape(pred_imgs), np.shape(test_mask), np.max(test_mask), np.min(test_mask))
+
+    # test_mask = clean_border(test_mask)
+    # pred_imgs = np.array(list(map(lambda x: x[0] * x[1], zip(pred_imgs, test_mask))))
+    # gtruth_masks = np.array(list(map(lambda x: x[0] * x[1], zip(gtruth_masks, test_mask))))
+
+    pred_img = pred_imgs
+
+    vi_threshold = float(config.get("testing settings", "vi_threshold"))
+
+    if vi_threshold:
+        print("\nvisualized:  Costum threshold (for positive) of " + str(vi_threshold))
         for i in range(pred_imgs.shape[2]):
             for j in range(pred_imgs.shape[3]):
-                if pred_imgs[0][0][i][j] >= threshold:
+                if pred_imgs[0][0][i][j] >= vi_threshold:
                     pred_imgs[0][0][i][j] = 1
                 else:
                     pred_imgs[0][0][i][j] = 0
@@ -141,18 +156,21 @@ def visualized(patches_imgs_test, test_mask, pred_patches, test_groundtruth, new
     group = N_visual
     assert (N_predicted % group == 0)
 
+    gtruth_masks = gtruth_masks / color_range_g
+
     for i in range(int(N_predicted / group)):
         orig_stripe = group_images(orig_imgs[i * group:(i * group) + group, :, :, :], group)
         masks_stripe = group_images(gtruth_masks[i * group:(i * group) + group, :, :, :], group)
         pred_stripe = group_images(pred_imgs[i * group:(i * group) + group, :, :, :], group)
         total_img = np.concatenate((orig_stripe, masks_stripe, pred_stripe), axis=0)
-        visualize(total_img,
-                  new_path_experiment + name_experiment + "_Original_GroundTruth_Prediction" + str(counter))  # .show()
-    return pred_img, gtruth_masks
+        visualize(total_img, new_path_experiment + name_experiment + "_Original_GroundTruth_Prediction" + str(counter))
+
+    return pred_img, gtruth_masks, gtruth_masks
 
 
 def evaluate_roc(y_true, y_scores, number, i):
     # Area under the ROC curve
+
     fpr, tpr, thresholds = roc_curve((y_true), y_scores)
     AUC_ROC = roc_auc_score(y_true, y_scores)
     # test_integral = np.trapz(tpr,fpr) #trapz is numpy integration
@@ -235,6 +253,8 @@ def F1_s(y_true, y_pred):
 
 
 def evaluate(y_true, y_scores, number=0, i=0, result=[]):
+    y_true = y_true / color_range_g
+    y_scores = y_scores / color_range_g
     AUC_ROC = evaluate_roc(y_true, y_scores, number, i)
     AUC_prec_rec = evaluate_prc(y_true, y_scores, number, i)
     confusion, y_pred, accuracy, specificity, sensitivity, precision = confusion_matrixd(y_true, y_scores)
@@ -272,7 +292,7 @@ def evaluate(y_true, y_scores, number=0, i=0, result=[]):
     return result
 
 
-def main(round, result):
+def predict(round, result):
     patches_imgs_test = None
     new_height = None
     new_width = None
@@ -287,6 +307,7 @@ def main(round, result):
 
     for i in range(round * full_images_to_test, (round + 1) * full_images_to_test):
         print("\n===============the %d/%d round===============" % (i, (round + 1) * full_images_to_test))
+        start_time = time.time()
         if average_mode == True:
             patches_imgs_test, new_height, new_width, test_groundtruth, test_mask = get_data_testing_overlap(
                 DRIVE_test_imgs_original=DRIVE_test_imgs_original,  # original
@@ -294,13 +315,15 @@ def main(round, result):
                                                                                                        dataset),
                 # masks
                 DRIVE_test_mask=path_data + config.get('data paths', 'test_border_masks').replace("DRIVE",
-                                                                                                       dataset),
+                                                                                                  dataset),
                 patch_height=patch_height,
                 patch_width=patch_width,
                 stride_height=stride_height,
                 stride_width=stride_width,
                 color_channel=int(config.get('public', 'color_channel')),
-                number=i
+                number=i,
+                color_range_o=int(config.get('public', 'color_range_o')),
+                color_range_g=color_range_g
             )
         else:
             patches_imgs_test, patches_masks_test = get_data_testing(
@@ -323,8 +346,8 @@ def main(round, result):
             else:
                 pred_patches = predicision[j]
 
-            pred_imgs, gtruth_masks = visualized(patches_imgs_test, test_mask, pred_patches, test_groundtruth,
-                                                 new_height, new_width, number, i)
+            pred_imgs, gtruth_masks, test_groundtruth = visualized(patches_imgs_test, test_mask, pred_patches,
+                                                                   test_groundtruth, new_height, new_width, number, i)
 
             score, true = pred_only_FOV(pred_imgs, gtruth_masks)  # returns data only inside the FOV
 
@@ -342,6 +365,8 @@ def main(round, result):
             y_scores = np.concatenate((y_scores, y_score), axis=0)
             y_trues = np.concatenate((y_trues, y_true), axis=0)
 
+        print("======all cost %ds======" % (int(time.time() - start_time)))
+
     for i in range(num_of_loss):
         number = i
         result = evaluate(y_trues[:, i:i + 1], y_scores[:, i:i + 1], number, round, result)
@@ -354,4 +379,4 @@ if __name__ == '__main__':
     for i in range(num_of_loss):
         result.append([0, 0, 0, 0])
     for i in range(part):
-        result = main(i, result)
+        result = predict(i, result)

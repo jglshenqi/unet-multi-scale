@@ -19,7 +19,9 @@ def get_data_training(DRIVE_train_imgs_original,
                       patch_width,
                       N_subimgs,
                       color_channel,
-                      train_coordinate):
+                      train_coordinate,
+                      color_range_o,
+                      color_range_g):
     train_imgs_original = load_hdf5(DRIVE_train_imgs_original)
     train_groundtruth = load_hdf5(DRIVE_train_groudTruth)  # masks always the same
     # visualize(group_images(train_imgs_original[0:20,:,:,:],5),'imgs_train')#.show()  #check original imgs train
@@ -29,13 +31,14 @@ def get_data_training(DRIVE_train_imgs_original,
     else:
         train_imgs = train_imgs_original
 
-    print(np.max(train_imgs), np.min(train_imgs))
-    train_groundtruth = train_groundtruth / 255.
-    #
-    data_consistency_check(train_imgs, train_groundtruth)
+    if color_range_o:
+        train_imgs = train_imgs / 255 * color_range_o
+    if color_range_g:
+        train_groundtruth = train_groundtruth / 255 * color_range_g
 
-    # check masks are within 0-1
-    assert (np.min(train_groundtruth) == 0 and np.max(train_groundtruth) == 1)
+    print("Color range for train is in(%d,%d),channel%d" % (int(train_imgs.min()), (train_imgs.max()), color_channel))
+
+    data_consistency_check(train_imgs, train_groundtruth)
 
     print("\ntrain images/masks shape:")
     print(train_imgs.shape)
@@ -97,7 +100,7 @@ def get_data_testing(DRIVE_test_imgs_original, DRIVE_test_groudTruth, Imgs_to_te
 # Load the original data and return the extracted patches for testing
 # return the ground truth in its original shape
 def get_data_testing_overlap(DRIVE_test_imgs_original, DRIVE_test_groudTruth, DRIVE_test_mask, patch_height,
-                             patch_width, stride_height, stride_width, color_channel, number):
+                             patch_width, stride_height, stride_width, color_channel, number, color_range_o,color_range_g):
     test_imgs_original = load_hdf5(DRIVE_test_imgs_original)
     test_groundtruth = load_hdf5(DRIVE_test_groudTruth)
     test_mask = load_hdf5(DRIVE_test_mask)
@@ -106,7 +109,13 @@ def get_data_testing_overlap(DRIVE_test_imgs_original, DRIVE_test_groudTruth, DR
     else:
         test_imgs = test_imgs_original
 
-    test_groundtruth = test_groundtruth / 255.
+    if color_range_o:
+        test_imgs = test_imgs / 255 * color_range_o
+    if color_range_g:
+        test_groundtruth = test_groundtruth / 255 * color_range_g
+
+    print("Color range for test is in(%d,%d),channel%d" % (int(test_imgs.min()), (test_imgs.max()), color_channel))
+
     test_mask = test_mask / 255
     # extend both images and masks so they can be divided exactly by the patches dimensions
     test_imgs = test_imgs[number:number + 1, :, :, :]
@@ -343,6 +352,28 @@ def paint_border(data, patch_h, patch_w):
     new_data = np.zeros((data.shape[0], data.shape[1], new_img_h, new_img_w))
     new_data[:, :, 0:img_h, 0:img_w] = data[:, :, :, :]
     return new_data
+
+
+def clean_border(data):
+    print(data.shape)
+    data = data[0][0] * 255
+    dot = 10
+    for i in range(dot, (np.shape(data)[0] - dot + 1)):
+        for j in range(dot, (np.shape(data)[1] - dot + 1)):
+
+            patch = data[i - dot:i + dot, j - dot:j + dot]
+            if np.min(patch) == 0:
+                patch[patch > 200] = 1
+                data[i - dot:i + dot, j - dot:j + dot] = patch
+
+    data[data < 10] = 0
+    data[data > 10] = 1
+    data = np.array(data)
+    data = data.reshape((1, 1, data.shape[0], data.shape[1]))
+    # img = Image.fromarray(data)
+    # img.show()
+    # stop = input()
+    return data
 
 
 # return only the pixels contained in the FOV, for both images and masks

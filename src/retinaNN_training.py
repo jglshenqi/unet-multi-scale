@@ -1,3 +1,4 @@
+# coding:utf-8
 import configparser
 from keras.callbacks import ModelCheckpoint, Callback
 import network
@@ -5,6 +6,7 @@ from extract_patches import get_data_training
 from help_functions import *
 from scipy import ndimage
 import skimage.measure
+import time
 
 # ========= Load settings from Config file
 config = configparser.RawConfigParser()
@@ -17,12 +19,36 @@ name_experiment = config.get('experiment name', 'name')
 # training settings
 N_epochs = int(config.get('training settings', 'N_epochs'))
 batch_size = int(config.get('training settings', 'batch_size'))
-net_name = config.get('public', 'network')
+net_name = config.get('public', 'net_config')
 num_of_classes = int(config.get('public', 'num_of_classes'))
 num_of_loss = int(config.get(net_name, 'num_of_loss'))
 softmax = int(config.get(net_name, 'softmax'))
 mask_original = int(config.get(net_name, 'mask_original'))
 type_of_output = int(config.get(net_name, 'type_of_output'))
+get_net = str(config.get('public', 'network'))
+path_experiment = './' + name_experiment + "/"
+
+
+def save_config():
+    color_channel = "color_channel"
+    if int(config.get('public', 'color_channel')) == 1:
+        color_channel = "grey_scale map"
+    elif int(config.get('public', 'color_channel')) == 3:
+        color_channel = "color map"
+    loss = "[" + config.get('public', 'loss_weight_0') + "," \
+           + config.get('public', 'loss_weight_1') + "," \
+           + config.get('public', 'loss_weight_2') + "," \
+           + config.get('public', 'loss_weight_3') + "]"
+
+    file = open(path_experiment + 'save_config.txt', 'w')
+    file.write("Time of the experiment: " + str(time.ctime())
+               + "\nUsing the network:" + config.get('public', 'network')
+               + "\nUsing the dataset:" + dataset
+               + "\ncolor_channel is:" + color_channel
+               + "\npixel range from 0 to " + config.get('public', 'color_range_o')
+               + "\ngroundtruth range from 0 to " + config.get('public', 'color_range_g')
+               + "\nloss_weight is: " + loss)
+    file.close()
 
 
 def save_sample(patches_imgs_train, patches_masks_train):
@@ -41,8 +67,26 @@ def get_model(shape):
     patch_height = shape[2]
     patch_width = shape[3]
 
-    # model = network.get_dianet(n_ch, patch_height, patch_width) #the U-net model
-    model = network.get_unet_all(n_ch, patch_height, patch_width)
+    if get_net == "unet":
+        model = network.get_unet(n_ch, patch_height, patch_width)  # the U-net model
+    elif get_net == "hed":
+        model = network.get_hed(n_ch, patch_height, patch_width)
+    elif get_net == "unet3":
+        model = network.get_unet3(n_ch, patch_height, patch_width)
+    elif get_net == "unet4":
+        model = network.get_unet4(n_ch, patch_height, patch_width)
+    elif get_net == "unet5":
+        model = network.get_unet5(n_ch, patch_height, patch_width)
+    elif get_net == "unet_all":
+        model = network.get_unet_all(n_ch, patch_height, patch_width)
+    elif get_net == "unet_dm":
+        model = network.get_unet_dm(n_ch, patch_height, patch_width)
+    elif get_net == "unet_dsm":
+        model = network.get_unet_dsm(n_ch, patch_height, patch_width)
+    else:
+        print("Please input a correct network!")
+        exit(0)
+
     print("Check: final output of the network:")
     print(model.output_shape)
     # plot(model, to_file='./'+name_experiment+'/'+name_experiment + '_model.png')   #check how the model looks like
@@ -91,6 +135,8 @@ class LossHistory(Callback):
 
 
 def main():
+    save_config()
+
     patches_imgs_train, patches_masks_train = get_data_training(
         DRIVE_train_imgs_original=path_data + config.get('data paths', 'train_imgs_original').replace("DRIVE", dataset),
         DRIVE_train_groudTruth=path_data + config.get('data paths', 'train_groundTruth').replace("DRIVE", dataset),
@@ -99,7 +145,9 @@ def main():
         N_subimgs=int(config.get('training settings', 'N_subimgs')),
         # select the patches only inside the FOV  (default == True))
         color_channel=int(config.get('public', 'color_channel')),
-        train_coordinate=path_data + "/" + config.get('data paths', 'train_coordinate').replace("DRIVE", dataset))
+        train_coordinate=path_data + "/" + config.get('data paths', 'train_coordinate').replace("DRIVE", dataset),
+        color_range_o=int(config.get('public', 'color_range_o')),
+        color_range_g=int(config.get('public', 'color_range_g')))
 
     print(np.max(patches_masks_train), np.max(patches_imgs_train))
 

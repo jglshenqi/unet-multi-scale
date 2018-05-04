@@ -40,19 +40,27 @@ def side_branch2(x, factor):
     return x
 
 
+def slice_0(x):
+    return x[:, 0:1, :, :]
+
+
+def slice_1(x):
+    return x[:, 1:2, :, :]
+
+
 def get_unet(n_ch, patch_height, patch_width):
     print("=====Using unet original=====")
     inputs = Input(shape=(n_ch, patch_height, patch_width))
     conv1 = Conv2D(32, (3, 3), activation='relu', padding='same', data_format='channels_first')(inputs)
     conv1 = Dropout(0.2)(conv1)
     conv1 = Conv2D(32, (3, 3), activation='relu', padding='same', data_format='channels_first')(conv1)
-    pool1 = MaxPooling2D((2, 2))(conv1)
+    pool1 = MaxPooling2D((2, 2), data_format='channels_first')(conv1)
     print("conv1 = ", conv1.shape, "pool1 = ", pool1.shape)
     #
     conv2 = Conv2D(64, (3, 3), activation='relu', padding='same', data_format='channels_first')(pool1)
     conv2 = Dropout(0.2)(conv2)
     conv2 = Conv2D(64, (3, 3), activation='relu', padding='same', data_format='channels_first')(conv2)
-    pool2 = MaxPooling2D((2, 2))(conv2)
+    pool2 = MaxPooling2D((2, 2), data_format='channels_first')(conv2)
     print("conv2 = ", conv2.shape, "pool2 = ", pool2.shape)
     #
     conv3 = Conv2D(128, (3, 3), activation='relu', padding='same', data_format='channels_first')(pool2)
@@ -61,14 +69,14 @@ def get_unet(n_ch, patch_height, patch_width):
     print("conv3 = ", conv3.shape)
 
     #
-    up1 = UpSampling2D(size=(2, 2))(conv3)
+    up1 = UpSampling2D(size=(2, 2), data_format='channels_first')(conv3)
     up1 = concatenate([conv2, up1], axis=1)
     conv4 = Conv2D(64, (3, 3), activation='relu', padding='same', data_format='channels_first')(up1)
     conv4 = Dropout(0.2)(conv4)
     conv4 = Conv2D(64, (3, 3), activation='relu', padding='same', data_format='channels_first')(conv4)
     print("up1 = ", up1, "conv4 = ", conv4.shape)
     #
-    up2 = UpSampling2D(size=(2, 2))(conv4)
+    up2 = UpSampling2D(size=(2, 2), data_format='channels_first')(conv4)
     up2 = concatenate([conv1, up2], axis=1)
     conv5 = Conv2D(32, (3, 3), activation='relu', padding='same', data_format='channels_first')(up2)
     conv5 = Dropout(0.2)(conv5)
@@ -223,78 +231,10 @@ def get_unet3(n_ch, patch_height, patch_width):
     return model
 
 
-def get_unet3_cl(n_ch, patch_height, patch_width):
-    print("=====Using unet3 (change loss)=====")
-    activation = 'selu'
-    inputs = Input(shape=(n_ch, patch_height, patch_width))
-    conv1 = Conv2D(32, (3, 3), activation=activation, padding='same', data_format='channels_first')(inputs)
-    conv1 = Dropout(0.2)(conv1)
-    conv1 = Conv2D(32, (3, 3), activation=activation, padding='same', data_format='channels_first')(conv1)
-    pool1 = MaxPooling2D((2, 2), data_format='channels_first')(conv1)
-    print("conv1 = ", conv1, "pool1 = ", pool1)
-    #
-    conv2 = Conv2D(64, (3, 3), activation=activation, padding='same', data_format='channels_first')(pool1)
-    conv2 = Dropout(0.2)(conv2)
-    conv2 = Conv2D(64, (3, 3), activation=activation, padding='same', data_format='channels_first')(conv2)
-    pool2 = MaxPooling2D((2, 2), data_format='channels_first')(conv2)
-    print("conv2 = ", conv2.shape, "pool2 = ", pool2.shape)
-    #
-    conv3 = Conv2D(128, (3, 3), activation=activation, padding='same', data_format='channels_first')(pool2)
-    conv3 = Dropout(0.2)(conv3)
-    conv3 = Conv2D(128, (3, 3), activation=activation, padding='same', data_format='channels_first')(conv3)
-    out1 = side_branch2(conv3, 4)
-    print("conv3 = ", conv3.shape)
-    #
-    up1 = UpSampling2D(size=(2, 2), data_format='channels_first')(conv3)
-    up1 = concatenate([conv2, up1], axis=1)
-    conv4 = Conv2D(64, (3, 3), activation=activation, padding='same', data_format='channels_first')(up1)
-    conv4 = Dropout(0.2)(conv4)
-    conv4 = Conv2D(64, (3, 3), activation=activation, padding='same', data_format='channels_first')(conv4)
-    out2 = side_branch2(conv4, 2)
-    print("up1 = ", up1, "conv4 = ", conv4.shape)
-    #
-    up2 = UpSampling2D(size=(2, 2), data_format='channels_first')(conv4)
-    up2 = concatenate([conv1, up2], axis=1)
-    conv5 = Conv2D(32, (3, 3), activation=activation, padding='same', data_format='channels_first')(up2)
-    conv5 = Dropout(0.2)(conv5)
-    conv5 = Conv2D(32, (3, 3), activation=activation, padding='same', data_format='channels_first')(conv5)
-    out3 = side_branch2(conv5, 1)
-    print("up2 = ", up2, "conv5 = ", conv5.shape)
-    #
-    fuse = concatenate([out1, out2, out3], axis=1)
-    fuse = Conv2D(2, (1, 1), activation='relu', padding='same', data_format='channels_first')(fuse)
-
-    out1 = core.Permute((2, 3, 1))(out1)
-    out2 = core.Permute((2, 3, 1))(out2)
-    out3 = core.Permute((2, 3, 1))(out3)
-    fuse = core.Permute((2, 3, 1))(fuse)
-    #
-    out1 = core.Activation('softmax', name='o1')(out1)
-    out2 = core.Activation('softmax', name='o2')(out2)
-    out3 = core.Activation('softmax', name='o3')(out3)
-    fuse = core.Activation('softmax', name='ofuse')(fuse)
-    #
-    out1 = core.Permute((3, 1, 2), name='oo1')(out1)
-    out2 = core.Permute((3, 1, 2), name='oo2')(out2)
-    out3 = core.Permute((3, 1, 2), name='oo3')(out3)
-    fuse = core.Permute((3, 1, 2), name='oofuse')(fuse)
-
-    print("fuse shape:", fuse.shape)
-    # # model
-    model = Model(inputs=[inputs], outputs=[out1, out2, out3, fuse])
-    loss = 'categorical_crossentropy'
-    model.compile(optimizer='sgd', loss={'oo1': loss,
-                                         'oo2': loss,
-                                         'oo3': loss,
-                                         'oofuse': loss, }, loss_weights=loss_w, metrics=['accuracy'])
-
-    return model
-
-
 def get_unet_all(n_ch, patch_height, patch_width):
     print("=====Using unet_all =====")
     inputs = Input(shape=(n_ch, patch_height, patch_width))
-    print("inputs = ",inputs.shape)
+    print("inputs = ", inputs.shape)
     conv1 = Conv2D(32, (3, 3), activation='relu', padding='same', data_format='channels_first')(inputs)
     conv1 = Dropout(0.2)(conv1)
     conv1 = Conv2D(32, (3, 3), activation='relu', padding='same', data_format='channels_first')(conv1)
@@ -473,14 +413,6 @@ def get_unet5(n_ch, patch_height, patch_width):
     return model
 
 
-def slice_0(x):
-    return x[:, 0:1, :, :]
-
-
-def slice_1(x):
-    return x[:, 1:2, :, :]
-
-
 def get_unet_dsm(n_ch, patch_height, patch_width):
     print("=====Using unet3 (differ score map)=====")
     inputs = Input(shape=(n_ch, patch_height, patch_width))
@@ -557,7 +489,7 @@ def get_unet_dsm(n_ch, patch_height, patch_width):
     print("fuse shape:", fuse.shape)
     # # model
     model = Model(inputs=[inputs], outputs=[out1, out2, out3, fuse])
-    loss = 'categorical_crossentropy'
+    loss = cross_entropy_balanced
     model.compile(optimizer='sgd', loss={'oo1': loss,
                                          'oo2': loss,
                                          'oo3': loss,
@@ -626,7 +558,7 @@ def get_unet_dm(n_ch, patch_height, patch_width):
     print("fuse shape:", fuse.shape)
     # # model
     model = Model(inputs=[inputs], outputs=[out1, out2, out3, fuse])
-    loss = 'categorical_crossentropy'
+    loss = cross_entropy_balanced
     model.compile(optimizer='sgd', loss={'oo1': loss,
                                          'oo2': loss,
                                          'oo3': loss,
@@ -1325,7 +1257,8 @@ def _to_tensor(x, dtype):
         x = tf.cast(x, dtype)
     return x
 
-#
-# model = get_unet_all( 1, 48, 48)
+
+# #
+# model = get_unet(1, 48, 48)
 # print("Check: final output of the network:")
 # print(model.output_shape)
