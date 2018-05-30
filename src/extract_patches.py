@@ -1,171 +1,187 @@
-import numpy as np
 import random
-import configparser
-
 from help_functions import *
-from help_functions import visualize
-from help_functions import group_images
+import skimage.measure
 
-from pre_processing import my_PreProc
+from pre_processing import my_PreProc, color_PreProc
 
 
-# To select the same images
-# random.seed(10)
+# preprocessing for both training and testing
+def preprocessing(data, color_channel):
+    if color_channel == 1:
+        data = my_PreProc(data)
+    else:
+        data = color_PreProc(data)
+    data = data / 255
+    return data
+
+
+# adjust the training_gtruth if it is a deeply supervised problem
+def adjust_gtruth(data, softmax_index, num_of_loss, differ_output):
+    if softmax_index:
+        data = np.concatenate((1 - data, data), axis=1)
+
+    if differ_output:
+        temp = [1, 2, 3, 4]
+        temp[0] = skimage.measure.block_reduce(data, (1, 1, 4, 4), np.max)
+        temp[1] = skimage.measure.block_reduce(data, (1, 1, 2, 2), np.max)
+        temp[2] = data
+        temp[3] = data
+        print("train gtruth shape:", np.shape(temp[0]), np.shape(temp[1]), np.shape(temp[2]), np.shape(temp[3]),
+              "train gtruth range: " + str(np.min(temp[3])) + ' - ' + str(np.max(temp[3])))
+    else:
+        temp = []
+        for i in range(num_of_loss):
+            temp.append(data)
+        print("train gtruth shape:", np.shape(temp),
+              "train gtruth range: " + str(np.min(temp)) + ' - ' + str(np.max(temp)))
+
+    return temp
+
 
 # Load the original data and return the extracted patches for training/testing
 def get_data_training(DRIVE_train_imgs_original,
                       DRIVE_train_groudTruth,
                       patch_height,
                       patch_width,
-                      N_subimgs,
                       color_channel,
                       train_coordinate,
-                      color_range_o,
-                      color_range_g):
-    train_imgs_original = load_hdf5(DRIVE_train_imgs_original)
-    train_groundtruth = load_hdf5(DRIVE_train_groudTruth)  # masks always the same
-    # visualize(group_images(train_imgs_original[0:20,:,:,:],5),'imgs_train')#.show()  #check original imgs train
+                      training_format,
+                      num_of_loss,
+                      softmax_index,
+                      differ_output):
+    # load training images and groundtruth
+    train_imgs = load_hdf5(DRIVE_train_imgs_original)
+    train_gtruth = load_hdf5(DRIVE_train_groudTruth)
 
-    if color_channel == 1:
-        train_imgs = my_PreProc(train_imgs_original)
-    else:
-        train_imgs = train_imgs_original
+    # preprocessing of the images,result is between [0,1]
+    train_imgs = preprocessing(train_imgs, color_channel)
+    train_gtruth = train_gtruth / 255
 
-    if color_range_o:
-        train_imgs = train_imgs / 255 * color_range_o
-    if color_range_g:
-        train_groundtruth = train_groundtruth / 255 * color_range_g
-
-    print("Color range for train is in(%d,%d),channel%d" % (int(train_imgs.min()), (train_imgs.max()), color_channel))
-
-    data_consistency_check(train_imgs, train_groundtruth)
-
-    print("\ntrain images/masks shape:")
-    print(train_imgs.shape)
-    print("train images range (min-max): " + str(np.min(train_imgs)) + ' - ' + str(np.max(train_imgs)))
-    print("train masks are within 0-1\n")
+    print("train images shape:", train_imgs.shape,
+          "train images range (min-max): " + str(np.min(train_imgs)) + ' - ' + str(np.max(train_imgs)))
+    print("train gtruth shape:", train_gtruth.shape,
+          "train gtruth range (min-max): " + str(np.min(train_gtruth)) + ' - ' + str(np.max(train_gtruth)))
 
     # extract the TRAINING patches from the full images
-    patches_imgs_train, patches_groundtruth_train = extract_random(train_imgs, train_groundtruth, patch_height,
-                                                                   patch_width,
-                                                                   N_subimgs, train_coordinate)
-    data_consistency_check(patches_imgs_train, patches_groundtruth_train)
+    patches_imgs_train = []
+    patches_gtruth_train = []
+    if training_format == 0:
+        patch_width = 49
+        patch_height = 49
+        N_subimgs = 400000
+        patches_imgs_train, patches_gtruth_train = extract_random(train_imgs,
+                                                                  train_gtruth,
+                                                                  patch_height,
+                                                                  patch_width,
+                                                                  N_subimgs)
+    elif training_format == 1:
+        patches_imgs_train, patches_gtruth_train = extract_coordinate(train_imgs,
+                                                                      train_gtruth,
+                                                                      patch_height,
+                                                                      patch_width,
+                                                                      train_coordinate)
+    elif training_format == 2:
+        patches_imgs_train = train_imgs
+        patches_gtruth_train = train_gtruth
 
-    print("\ntrain PATCHES images/masks shape:")
-    print(patches_imgs_train.shape)
-    print("train PATCHES images range (min-max): " + str(np.min(patches_imgs_train)) + ' - ' + str(
-        np.max(patches_imgs_train)))
+    print("train patches shape:", np.shape(patches_imgs_train),
+          "train patches range: " + str(np.min(patches_imgs_train)) + ' - ' + str(np.max(patches_imgs_train)))
+    patches_gtruth_train = adjust_gtruth(patches_gtruth_train, softmax_index, num_of_loss, differ_output)
 
-    return patches_imgs_train, patches_groundtruth_train  # , patches_imgs_test, patches_masks_test
+    return patches_imgs_train, patches_gtruth_train
 
 
-# Load the original data and return the extracted patches for training/testing
-def get_data_testing(DRIVE_test_imgs_original, DRIVE_test_groudTruth, Imgs_to_test, patch_height, patch_width):
-    ### test
+def get_data_testing_overlap(DRIVE_test_imgs_original,
+                             DRIVE_test_mask,
+                             start_img,
+                             patch_height,
+                             patch_width,
+                             stride_height,
+                             stride_width,
+                             color_channel,
+                             training_format):
+    # load images from hdf5 file
     test_imgs_original = load_hdf5(DRIVE_test_imgs_original)
-    test_masks = load_hdf5(DRIVE_test_groudTruth)
-
-    test_imgs = my_PreProc(test_imgs_original)
-    test_masks = test_masks / 255.
-
-    # extend both images and masks so they can be divided exactly by the patches dimensions
-    test_imgs = test_imgs[0:Imgs_to_test, :, :, :]
-    test_masks = test_masks[0:Imgs_to_test, :, :, :]
-    test_imgs = paint_border(test_imgs, patch_height, patch_width)
-    test_masks = paint_border(test_masks, patch_height, patch_width)
-
-    data_consistency_check(test_imgs, test_masks)
-
-    # check masks are within 0-1
-    assert (np.max(test_masks) == 1 and np.min(test_masks) == 0)
-
-    print("\ntest images/masks shape:")
-    print(test_imgs.shape)
-    print("test images range (min-max): " + str(np.min(test_imgs)) + ' - ' + str(np.max(test_imgs)))
-    print("test masks are within 0-1\n")
-
-    # extract the TEST patches from the full images
-    patches_imgs_test = extract_ordered(test_imgs, patch_height, patch_width)
-    patches_masks_test = extract_ordered(test_masks, patch_height, patch_width)
-    data_consistency_check(patches_imgs_test, patches_masks_test)
-
-    print("\ntest PATCHES images/masks shape:")
-    print(patches_imgs_test.shape)
-    print("test PATCHES images range (min-max): " + str(np.min(patches_imgs_test)) + ' - ' + str(
-        np.max(patches_imgs_test)))
-
-    return patches_imgs_test, patches_masks_test
-
-
-# Load the original data and return the extracted patches for testing
-# return the ground truth in its original shape
-def get_data_testing_overlap(DRIVE_test_imgs_original, DRIVE_test_groudTruth, DRIVE_test_mask, patch_height,
-                             patch_width, stride_height, stride_width, color_channel, number, color_range_o,color_range_g):
-    test_imgs_original = load_hdf5(DRIVE_test_imgs_original)
-    test_groundtruth = load_hdf5(DRIVE_test_groudTruth)
     test_mask = load_hdf5(DRIVE_test_mask)
-    if color_channel == 1:
-        test_imgs = my_PreProc(test_imgs_original)
-    else:
-        test_imgs = test_imgs_original
-
-    if color_range_o:
-        test_imgs = test_imgs / 255 * color_range_o
-    if color_range_g:
-        test_groundtruth = test_groundtruth / 255 * color_range_g
-
-    print("Color range for test is in(%d,%d),channel%d" % (int(test_imgs.min()), (test_imgs.max()), color_channel))
-
+    # preprocessing of the test
+    test_imgs = preprocessing(test_imgs_original, color_channel)
     test_mask = test_mask / 255
-    # extend both images and masks so they can be divided exactly by the patches dimensions
-    test_imgs = test_imgs[number:number + 1, :, :, :]
-    test_groundtruth = test_groundtruth[number:number + 1, :, :, :]
-    test_mask = test_mask[number:number + 1, :, :, :]
-    test_imgs = paint_border_overlap(test_imgs, patch_height, patch_width, stride_height, stride_width)
 
-    # check masks are within 0-1
-    # assert(np.max(test_masks)==1  and np.min(test_masks)==0)
+    test_imgs = test_imgs[start_img:start_img + 1, :, :, :]
+    test_mask = test_mask[start_img:start_img + 1, :, :, :]
 
-    print("test images shape:")
-    print(test_imgs.shape)
+    print("test imgs shape:", test_imgs.shape, "test imgs range:", np.min(test_imgs), "-", np.max(test_imgs))
+    print("test mask shape:", test_mask.shape, "test mask range:", np.min(test_mask), "-", np.max(test_mask))
+    # get the patches for test in different conditions
+    patches_imgs_test = []
+    if training_format == 0:
+        patch_width = 49
+        patch_height = 49
+        stride_height = 1
+        stride_width = 1
+        patches_imgs_test = extract_ordered_overlap(test_imgs,
+                                                    patch_height,
+                                                    patch_width,
+                                                    stride_height,
+                                                    stride_width)
+    elif training_format == 1:
+        test_imgs = paint_border_overlap(test_imgs,
+                                         patch_height,
+                                         patch_width,
+                                         stride_height,
+                                         stride_width)
+        patches_imgs_test = extract_ordered_overlap(test_imgs,
+                                                    patch_height,
+                                                    patch_width,
+                                                    stride_height,
+                                                    stride_width)
+    elif training_format == 2:
+        patches_imgs_test = test_imgs
 
-    # extract the TEST patches from the full images
-    patches_imgs_test = extract_ordered_overlap(test_imgs, patch_height, patch_width, stride_height, stride_width)
+    # print("test imgs shape:", test_imgs.shape, "test imgs range:", np.min(test_imgs), "-", np.max(test_imgs))
+    print("patches_imgs_test shape:", patches_imgs_test.shape,
+          "patches_imgs_test range:", np.min(patches_imgs_test), "-", np.max(patches_imgs_test))
 
-    print("\ntest PATCHES images shape:", patches_imgs_test.shape)
-    print("test PATCHES images range (min-max): " + str(np.min(patches_imgs_test)) + ' - ' + str(
-        np.max(patches_imgs_test)))
-
-    return patches_imgs_test, test_imgs.shape[2], test_imgs.shape[3], test_groundtruth, test_mask
+    return patches_imgs_test, test_mask, test_imgs.shape[2], test_imgs.shape[3]
 
 
-# data consinstency check
-def data_consistency_check(imgs, masks):
-    assert (len(imgs.shape) == len(masks.shape))
-    assert (imgs.shape[0] == masks.shape[0])
-    assert (imgs.shape[2] == masks.shape[2])
-    assert (imgs.shape[3] == masks.shape[3])
-    assert (masks.shape[1] == 1)
-    assert (imgs.shape[1] == 1 or imgs.shape[1] == 3)
-
-
-# extract patches randomly in the full training images
-#  -- Inside OR in full image
-def extract_random(full_imgs, full_masks, patch_h, patch_w, N_patches, train_coordinate):
-    if (N_patches % full_imgs.shape[0] != 0):
-        print("N_patches: plase enter a multiple of 20")
-        exit()
-    training_node = load_node(train_coordinate)
-    training_shape = np.shape(training_node)
-    assert (len(full_imgs.shape) == 4 and len(full_masks.shape) == 4)  # 4D arrays
-    assert (full_imgs.shape[1] == 1 or full_imgs.shape[1] == 3)  # check the channel is 1 or 3
-    assert (full_masks.shape[1] == 1)  # masks only black and white
-    assert (full_imgs.shape[2] == full_masks.shape[2] and full_imgs.shape[3] == full_masks.shape[3])
-    patches = np.empty((training_shape[0] * training_shape[1], full_imgs.shape[1], patch_h, patch_w))
-    patches_masks = np.empty((training_shape[0] * training_shape[1], full_masks.shape[1], patch_h, patch_w))
+# get the training patches,just for the fcnet
+def extract_random(full_imgs, full_gtruth, patch_h, patch_w, N_patches):
+    patches = np.empty((N_patches, full_imgs.shape[1], patch_h, patch_w))
+    patches_gtruth = np.empty((N_patches, 1))
     img_h = full_imgs.shape[2]  # height of the full image
     img_w = full_imgs.shape[3]  # width of the full image
-    # (0,0) in the center of the image
+    patch_per_img = int(N_patches / full_imgs.shape[0])  # N_patches equally divided in the full images
+    iter_tot = 0  # iter over the total numbe rof patches (N_patches)
+
+    for i in range(full_imgs.shape[0]):  # loop over the full images
+        k = 0
+        while k < patch_per_img:
+            # delt = int(patch_w / 2)
+            x_center = random.randint(0 + int((patch_w) / 2), img_w - int((patch_w) / 2) - 1)
+            y_center = random.randint(0 + int((patch_h) / 2), img_h - int((patch_h) / 2) - 1)
+            patch = full_imgs[i, :, y_center - int(patch_h / 2):y_center + int(patch_h / 2) + 1,
+                    x_center - int(patch_w / 2):x_center + int(patch_w / 2) + 1]
+            patch_gtruth = full_gtruth[i, :, y_center, x_center]
+            patches[iter_tot] = patch
+            patches_gtruth[iter_tot] = patch_gtruth
+            iter_tot += 1  # total
+            k += 1  # per full_img
+    return patches, patches_gtruth
+
+
+# get the training patches from coordinate file
+def extract_coordinate(full_imgs, full_gtruth, patch_h, patch_w, train_coordinate):
+    usage = 1
+    training_node = load_node(train_coordinate)
+    training_shape = np.shape(training_node)
+    assert (len(full_imgs.shape) == 4 and len(full_gtruth.shape) == 4)  # 4D arrays
+    assert (full_imgs.shape[1] == 1 or full_imgs.shape[1] == 3)  # check the channel is 1 or 3
+    assert (full_gtruth.shape[1] == 1)  # masks only black and white
+    assert (full_imgs.shape[2] == full_gtruth.shape[2] and full_imgs.shape[3] == full_gtruth.shape[3])
+    patches = np.empty((int(training_shape[0] * training_shape[1] / usage), full_imgs.shape[1], patch_h, patch_w))
+    patches_gtruth = np.empty(
+        (int(training_shape[0] * training_shape[1] / usage), full_gtruth.shape[1], patch_h, patch_w))
     patch_per_img = int(
         training_shape[0] * training_shape[1] / full_imgs.shape[0])  # N_patches equally divided in the full images
     print("patches per full image: " + str(patch_per_img))
@@ -174,50 +190,25 @@ def extract_random(full_imgs, full_masks, patch_h, patch_w, N_patches, train_coo
     for i in range(training_shape[0]):  # loop over the full images
         k = 0
         while k < training_shape[1]:
+            if k % usage != 0:
+                k = k + 1
+                continue
             x_center = training_node[i][k][0]
             y_center = training_node[i][k][1]
 
             patch = full_imgs[i, :, y_center - int(patch_h / 2):y_center + int(patch_h / 2),
                     x_center - int(patch_w / 2):x_center + int(patch_w / 2)]
-            patch_mask = full_masks[i, :, y_center - int(patch_h / 2):y_center + int(patch_h / 2),
-                         x_center - int(patch_w / 2):x_center + int(patch_w / 2)]
+            patch_gtruth = full_gtruth[i, :, y_center - int(patch_h / 2):y_center + int(patch_h / 2),
+                           x_center - int(patch_w / 2):x_center + int(patch_w / 2)]
             patches[iter_tot] = patch
-            patches_masks[iter_tot] = patch_mask
+            patches_gtruth[iter_tot] = patch_gtruth
             iter_tot += 1  # total
             k += 1  # per full_img
 
-    return patches, patches_masks
+    return patches, patches_gtruth
 
 
-# Divide all the full_imgs in pacthes
-def extract_ordered(full_imgs, patch_h, patch_w):
-    assert (len(full_imgs.shape) == 4)  # 4D arrays
-    assert (full_imgs.shape[1] == 1 or full_imgs.shape[1] == 3)  # check the channel is 1 or 3
-    img_h = full_imgs.shape[2]  # height of the full image
-    img_w = full_imgs.shape[3]  # width of the full image
-    N_patches_h = int(img_h / patch_h)  # round to lowest int
-    if (img_h % patch_h != 0):
-        print("warning: " + str(N_patches_h) + " patches in height, with about " + str(
-            img_h % patch_h) + " pixels left over")
-    N_patches_w = int(img_w / patch_w)  # round to lowest int
-    if (img_h % patch_h != 0):
-        print("warning: " + str(N_patches_w) + " patches in width, with about " + str(
-            img_w % patch_w) + " pixels left over")
-    print("number of patches per image: " + str(N_patches_h * N_patches_w))
-    N_patches_tot = (N_patches_h * N_patches_w) * full_imgs.shape[0]
-    patches = np.empty((N_patches_tot, full_imgs.shape[1], patch_h, patch_w))
-
-    iter_tot = 0  # iter over the total number of patches (N_patches)
-    for i in range(full_imgs.shape[0]):  # loop over the full images
-        for h in range(N_patches_h):
-            for w in range(N_patches_w):
-                patch = full_imgs[i, :, h * patch_h:(h * patch_h) + patch_h, w * patch_w:(w * patch_w) + patch_w]
-                patches[iter_tot] = patch
-                iter_tot += 1  # total
-    assert (iter_tot == N_patches_tot)
-    return patches  # array with all the full_imgs divided in patches
-
-
+# paint border if it is not exact division by stride
 def paint_border_overlap(full_imgs, patch_h, patch_w, stride_h, stride_w):
     assert (len(full_imgs.shape) == 4)  # 4D arrays
     assert (full_imgs.shape[1] == 1 or full_imgs.shape[1] == 3)  # check the channel is 1 or 3
@@ -271,6 +262,7 @@ def extract_ordered_overlap(full_imgs, patch_h, patch_w, stride_h, stride_w):
     return patches  # array with all the full_imgs divided in patches
 
 
+# recover the predictions if it is extended
 def recompone_overlap(preds, img_h, img_w, stride_h, stride_w):
     assert (len(preds.shape) == 4)  # 4D arrays
     assert (preds.shape[1] == 1 or preds.shape[1] == 3)  # check the channel is 1 or 3
@@ -320,7 +312,7 @@ def recompone(data, N_h, N_w):
     full_recomp = np.empty((N_full_imgs, data.shape[1], N_h * patch_h, N_w * patch_w))
     k = 0  # iter full img
     s = 0  # iter single patch
-    while (s < data.shape[0]):
+    while s < data.shape[0]:
         # recompone one:
         single_recon = np.empty((data.shape[1], N_h * patch_h, N_w * patch_w))
         for h in range(N_h):
@@ -354,35 +346,13 @@ def paint_border(data, patch_h, patch_w):
     return new_data
 
 
-def clean_border(data):
-    print(data.shape)
-    data = data[0][0] * 255
-    dot = 10
-    for i in range(dot, (np.shape(data)[0] - dot + 1)):
-        for j in range(dot, (np.shape(data)[1] - dot + 1)):
-
-            patch = data[i - dot:i + dot, j - dot:j + dot]
-            if np.min(patch) == 0:
-                patch[patch > 200] = 1
-                data[i - dot:i + dot, j - dot:j + dot] = patch
-
-    data[data < 10] = 0
-    data[data > 10] = 1
-    data = np.array(data)
-    data = data.reshape((1, 1, data.shape[0], data.shape[1]))
-    # img = Image.fromarray(data)
-    # img.show()
-    # stop = input()
-    return data
-
-
 # return only the pixels contained in the FOV, for both images and masks
-def pred_only_FOV(data_imgs, data_masks):
-    assert (len(data_imgs.shape) == 4 and len(data_masks.shape) == 4)  # 4D arrays
-    assert (data_imgs.shape[0] == data_masks.shape[0])
-    assert (data_imgs.shape[2] == data_masks.shape[2])
-    assert (data_imgs.shape[3] == data_masks.shape[3])
-    assert (data_imgs.shape[1] == 1 and data_masks.shape[1] == 1)  # check the channel is 1
+def pred_only_FOV(data_imgs, data_gtruth, test_mask):
+    assert (len(data_imgs.shape) == 4 and len(data_gtruth.shape) == 4)  # 4D arrays
+    assert (data_imgs.shape[0] == data_gtruth.shape[0])
+    assert (data_imgs.shape[2] == data_gtruth.shape[2])
+    assert (data_imgs.shape[3] == data_gtruth.shape[3])
+    assert (data_imgs.shape[1] == 1 and data_gtruth.shape[1] == 1)  # check the channel is 1
     height = data_imgs.shape[2]
     width = data_imgs.shape[3]
     new_pred_imgs = []
@@ -390,24 +360,12 @@ def pred_only_FOV(data_imgs, data_masks):
     for i in range(data_imgs.shape[0]):  # loop over the full images
         for x in range(width):
             for y in range(height):
-                new_pred_imgs.append(data_imgs[i, :, y, x])
-                new_pred_masks.append(data_masks[i, :, y, x])
+                if inside_FOV_DRIVE(i, x, y, test_mask) == True:
+                    new_pred_imgs.append(data_imgs[i, :, y, x])
+                    new_pred_masks.append(data_gtruth[i, :, y, x])
     new_pred_imgs = np.asarray(new_pred_imgs)
     new_pred_masks = np.asarray(new_pred_masks)
     return new_pred_imgs, new_pred_masks
-
-
-# function to set to black everything outside the FOV, in a full image
-def kill_border(data, original_imgs_border_masks):
-    assert (len(data.shape) == 4)  # 4D arrays
-    assert (data.shape[1] == 1 or data.shape[1] == 3)  # check the channel is 1 or 3
-    height = data.shape[2]
-    width = data.shape[3]
-    for i in range(data.shape[0]):  # loop over the full images
-        for x in range(width):
-            for y in range(height):
-                if inside_FOV_DRIVE(i, x, y, original_imgs_border_masks) == False:
-                    data[i, :, y, x] = 0.0
 
 
 def inside_FOV_DRIVE(i, x, y, DRIVE_masks):
@@ -415,10 +373,10 @@ def inside_FOV_DRIVE(i, x, y, DRIVE_masks):
     assert (DRIVE_masks.shape[1] == 1)  # DRIVE masks is black and white
     # DRIVE_masks = DRIVE_masks/255.  #NOOO!! otherwise with float numbers takes forever!!
 
-    if (x >= DRIVE_masks.shape[3] or y >= DRIVE_masks.shape[2]):  # my image bigger than the original
+    if x >= DRIVE_masks.shape[3] or y >= DRIVE_masks.shape[2]:  # my image bigger than the original
         return False
 
-    if (DRIVE_masks[i, 0, y, x] > 0):  # 0==black pixels
+    if DRIVE_masks[i, 0, y, x] > 0:  # 0==black pixels
         # print DRIVE_masks[i,0,y,x]  #verify it is working right
         return True
     else:

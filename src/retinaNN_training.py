@@ -4,31 +4,38 @@ from keras.callbacks import ModelCheckpoint, Callback
 import network
 from extract_patches import get_data_training
 from help_functions import *
-from scipy import ndimage
-import skimage.measure
 import time
+import os
+import time
+import tensorflow as tf
+from keras.backend.tensorflow_backend import set_session
 
 # ========= Load settings from Config file
 config = configparser.RawConfigParser()
-config.read('./configuration.txt')
+config.read('./configuration.txt', encoding='utf-8')
+
+# choose GPU
+GPU = str(config.get('public', 'GPU'))
+os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
+os.environ["CUDA_VISIBLE_DEVICES"] = GPU
+print("Using GPU ", GPU)
+
 dataset = config.get('public', 'dataset')
-# patch to the datasets
 path_data = config.get('data paths', 'path_local').replace("DRIVE", dataset)
-# Experiment name
 name_experiment = config.get('experiment name', 'name')
-# training settings
 N_epochs = int(config.get('training settings', 'N_epochs'))
 batch_size = int(config.get('training settings', 'batch_size'))
 net_name = config.get('public', 'net_config')
-num_of_classes = int(config.get('public', 'num_of_classes'))
-num_of_loss = int(config.get(net_name, 'num_of_loss'))
-softmax = int(config.get(net_name, 'softmax'))
-mask_original = int(config.get(net_name, 'mask_original'))
-type_of_output = int(config.get(net_name, 'type_of_output'))
+
 get_net = str(config.get('public', 'network'))
 path_experiment = './' + name_experiment + "/"
 
+configs = tf.ConfigProto()
+configs.gpu_options.allow_growth = True
+set_session(tf.Session(config=configs))
 
+
+# save training information
 def save_config():
     color_channel = "color_channel"
     if int(config.get('public', 'color_channel')) == 1:
@@ -45,8 +52,6 @@ def save_config():
                + "\nUsing the network:" + config.get('public', 'network')
                + "\nUsing the dataset:" + dataset
                + "\ncolor_channel is:" + color_channel
-               + "\npixel range from 0 to " + config.get('public', 'color_range_o')
-               + "\ngroundtruth range from 0 to " + config.get('public', 'color_range_g')
                + "\nloss_weight is: " + loss)
     file.close()
 
@@ -60,15 +65,14 @@ def save_sample(patches_imgs_train, patches_masks_train):
               './' + name_experiment + '/' + "sample_input_masks")  # .show()
 
 
+# load the training network
 def get_model(shape):
-    # =========== Construct and save the model arcitecture =====
     n_ch = shape[1]
-    print("for test", n_ch)
     patch_height = shape[2]
     patch_width = shape[3]
 
     if get_net == "unet":
-        model = network.get_unet(n_ch, patch_height, patch_width)  # the U-net model
+        model = network.get_unet(n_ch, patch_height, patch_width)
     elif get_net == "hed":
         model = network.get_hed(n_ch, patch_height, patch_width)
     elif get_net == "unet3":
@@ -81,15 +85,27 @@ def get_model(shape):
         model = network.get_unet_all(n_ch, patch_height, patch_width)
     elif get_net == "unet_dm":
         model = network.get_unet_dm(n_ch, patch_height, patch_width)
+    elif get_net == "unet_dm2":
+        model = network.get_unet_dm2(n_ch, patch_height, patch_width)
     elif get_net == "unet_dsm":
         model = network.get_unet_dsm(n_ch, patch_height, patch_width)
+    elif get_net == "unet_br":
+        model = network.get_unet_br(n_ch, patch_height, patch_width)
+    elif get_net == "unet_br2":
+        model = network.get_unet_br2(n_ch, patch_height, patch_width)
+    elif get_net == "fcnet":
+        model = network.get_fcnet(n_ch, patch_height, patch_width)
+    elif get_net == "unet_5l":
+        model = network.get_unet5l(n_ch, patch_height, patch_width)
+    elif get_net == "unet_6l":
+        model = network.get_unet6l(n_ch, patch_height, patch_width)
+    elif get_net == "unet_brnew":
+        model = network.get_unet_brnew(n_ch, patch_height, patch_width)
     else:
         print("Please input a correct network!")
         exit(0)
 
-    print("Check: final output of the network:")
-    print(model.output_shape)
-    # plot(model, to_file='./'+name_experiment+'/'+name_experiment + '_model.png')   #check how the model looks like
+    print("Check: final output of the network:", model.output_shape)
     json_string = model.to_json()
     open('./' + name_experiment + '/' + name_experiment + '_architecture.json', 'w').write(json_string)
 
@@ -134,62 +150,45 @@ class LossHistory(Callback):
         plt.savefig('./' + name_experiment + '/' + name_experiment + '_loss.png')
 
 
-def main():
+def train():
+    print("=====save config for training=====")
     save_config()
 
+    print("\n=====get the training patches=====")
     patches_imgs_train, patches_masks_train = get_data_training(
         DRIVE_train_imgs_original=path_data + config.get('data paths', 'train_imgs_original').replace("DRIVE", dataset),
         DRIVE_train_groudTruth=path_data + config.get('data paths', 'train_groundTruth').replace("DRIVE", dataset),
         patch_height=int(config.get('data attributes', 'patch_height')),
         patch_width=int(config.get('data attributes', 'patch_width')),
-        N_subimgs=int(config.get('training settings', 'N_subimgs')),
-        # select the patches only inside the FOV  (default == True))
         color_channel=int(config.get('public', 'color_channel')),
         train_coordinate=path_data + "/" + config.get('data paths', 'train_coordinate').replace("DRIVE", dataset),
-        color_range_o=int(config.get('public', 'color_range_o')),
-        color_range_g=int(config.get('public', 'color_range_g')))
-
-    print(np.max(patches_masks_train), np.max(patches_imgs_train))
-
+        training_format=int(config.get(net_name, 'training_format')),
+        num_of_loss=int(config.get(net_name, 'num_of_loss')),
+        softmax_index=int(config.get(net_name, 'softmax_index')),
+        differ_output=int(config.get(net_name, 'differ_output')))
     # save_sample(patches_imgs_train,patches_masks_train)
 
+    print("")
     model = get_model(patches_imgs_train.shape)
-
     # ============  Training ==================================
+    print("\n=====start training=====")
+    stop_loss = 'val_loss'
     checkpointer = ModelCheckpoint(filepath='./' + name_experiment + '/' + name_experiment + '_best_weights.h5',
                                    verbose=1,
-                                   monitor='val_loss', mode='auto',
+                                   monitor=stop_loss,
+                                   mode='auto',
                                    save_best_only=True)  # save at each epoch if the validation decreased
-
-    if mask_original == 0:
-        patches_masks_train = masks_Unet(patches_masks_train)  # reduce memory consumption
-    else:
-        if softmax:
-            patches_masks_train = masks_appsoft(patches_masks_train)
-        p = []
-        if type_of_output == 0:
-            for i in range(num_of_loss):
-                p.append(patches_masks_train)
-        elif type_of_output == 1:
-            p = [1, 2, 3, 4]
-            p[0] = skimage.measure.block_reduce(patches_masks_train, (1, 1, 4, 4), np.max)
-            p[1] = skimage.measure.block_reduce(patches_masks_train, (1, 1, 2, 2), np.max)
-            p[2] = patches_masks_train
-            p[3] = patches_masks_train
-        patches_masks_train = p
-
     history = LossHistory()
-
     model.fit(patches_imgs_train, patches_masks_train,
-              # np.array(patches_masks_train[0]),
               epochs=N_epochs, batch_size=batch_size, verbose=2,
               shuffle=True, validation_split=0.1, callbacks=[checkpointer, history])
 
-    # ========== Save and test the last model ===================
+    # ========== Save the last model ===================
     model.save_weights('./' + name_experiment + '/' + name_experiment + '_last_weights.h5', overwrite=True)
-
     history.loss_plot('epoch')
 
 
 if __name__ == '__main__':
-    main()
+    start_time = time.time()
+    train()
+    print("\nTraining ended,it costs", str(int(time.time() - start_time)) + " seconds")

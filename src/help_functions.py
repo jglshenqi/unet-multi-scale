@@ -7,11 +7,13 @@ import pickle
 plt.switch_backend('agg')
 
 
+# load images from hdf5 files
 def load_hdf5(infile):
     with h5py.File(infile, "r") as f:  # "with" close the file after its nested commands
         return f["image"][()]
 
 
+# write images into hdf5 files
 def write_hdf5(arr, outfile):
     with h5py.File(outfile, "w") as f:
         f.create_dataset("image", data=arr, dtype=arr.dtype)
@@ -56,44 +58,6 @@ def visualize(data, filename):
     return img
 
 
-# prepare the mask in the right shape for the Unet
-def masks_Unet(masks):
-    assert (len(masks.shape) == 4)  # 4D arrays
-    assert (masks.shape[1] == 1)  # check the channel is 1
-    im_h = masks.shape[2]
-    im_w = masks.shape[3]
-    masks = np.reshape(masks, (masks.shape[0], im_h * im_w))
-    new_masks = np.empty((masks.shape[0], im_h * im_w, 2))
-    for i in range(int(masks.shape[0])):
-
-        for j in range(im_h * im_w):
-            if masks[i, j] == 0:
-                new_masks[i, j, 0] = 1
-                new_masks[i, j, 1] = 0
-            else:
-                new_masks[i, j, 0] = 0
-                new_masks[i, j, 1] = 1
-    return new_masks
-
-
-def masks_appsoft(masks):
-    assert (len(masks.shape) == 4)  # 4D arrays
-    assert (masks.shape[1] == 1)  # check the channel is 1
-    print(masks.shape)
-    new_masks = np.empty((masks.shape[0], 2, masks.shape[2], masks.shape[3]))
-    for i in range(int(masks.shape[0])):
-        for j in range(masks.shape[2]):
-            for k in range(masks.shape[3]):
-                if masks[i, 0, j, k] == 0:
-                    new_masks[i, 0, j, k] = 1
-                    new_masks[i, 1, j, k] = 0
-                else:
-                    new_masks[i, 0, j, k] = 0
-                    new_masks[i, 1, j, k] = 1
-
-    return new_masks
-
-
 def pred_to_imgs(pred, patch_height, patch_width, mode="original"):
     assert (len(pred.shape) == 3)  # 3D array: (Npatches,height*width,2)
     assert (pred.shape[2] == 2)  # check the classes are 2
@@ -118,19 +82,14 @@ def pred_to_imgs(pred, patch_height, patch_width, mode="original"):
 
 
 def down_to_imgs(pred, mode):
-    # if pred.shape == 3:
-    #     pred = np.reshape(1,2,pred.shape[1],pred.shape[2])
+
     pred_images = np.empty((pred.shape[0], 1, pred.shape[2], pred.shape[3]))  # (Npatches,height*width)
     if mode == "original":
         for i in range(pred.shape[0]):
             for j in range(pred.shape[2]):
                 for k in range(pred.shape[3]):
                     pred_images[i, 0, j, k] = pred[i, 1, j, k]
-                    # print(pred[i, 0, j, k], pred[i, 1, j, k], pred[i, 0, j, k] + pred[i, 1, j, k])
-                    # if pred[i, 0, j, k]-pred[i, 1, j, k]>0:
-                    #     pred_images[i,0,j,k] = 1
-                    # else:
-                    #     pred_images[i,0,j,k] = 1
+
     elif mode == "threshold":
         for i in range(pred.shape[0]):
             for j in range(pred.shape[2]):

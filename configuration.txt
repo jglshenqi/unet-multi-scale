@@ -1,5 +1,5 @@
 [data paths]
-path_local = ./DRIVE_datasets_training_testing/
+path_local = ./dataset/DRIVE_datasets_training_testing/
 train_imgs_original = DRIVE_dataset_imgs_train.hdf5
 train_groundTruth = DRIVE_dataset_groundTruth_train.hdf5
 train_border_masks = DRIVE_dataset_borderMasks_train.hdf5
@@ -18,12 +18,8 @@ patch_width = 48
 
 
 [training settings]
-#number of total patches:
-N_subimgs = 180000
-#if patches are extracted only inside the field of view:
-inside_FOV = False
 #Number of training epochs
-N_epochs = 150
+N_epochs = 10
 batch_size = 32
 #if running with nohup
 nohup = False
@@ -32,83 +28,110 @@ nohup = False
 #Choose the model to test: best==epoch with min loss, last==last epoch
 best_last = best
 #number of full images for the test (max 20)
-#How many original-groundTruth-prediction images are visualized in each image
-N_group_visual = 1
 #Compute average in the prediction, improve results but require more patches to be predicted
 average_mode = True
 #Only if average_mode==True. Stride for patch extraction, lower value require more patches to be predicted
-stride_height = 20
-stride_width = 20
+stride_height = 8
+stride_width = 8
 #if running with nohup
 nohup = False
 vi_threshold = 0
 
 [public]
 network = unet3
+net_config = unet3
 dataset = DRIVE
 num_of_classes = 2
 GPU = 0
 color_channel = 1
 
-loss_weight_0 = 0.1
-loss_weight_1 = 0.5
-loss_weight_2 = 2.5
-loss_weight_3 = 12.5
+loss_weight_0 = 1
+loss_weight_1 = 1
+loss_weight_2 = 1
+loss_weight_3 = 1
 
 [DRIVE]
 full_images_to_test = 20
+dataset_mean = 79.0913675900109
+dataset_std = 70.2044150585992
+#80.29942043480018 71.45527706959761
 part = 1
 [HRF]
 full_images_to_test = 480
+dataset_mean = 80.83841938578134
+dataset_std = 76.43214153089184
+#73.96415703210248 69.42939979481052
 part = 5
 [STARE]
 full_images_to_test = 5
+dataset_mean = 88.87445656565657
+dataset_std = 79.9109845542935
+#85.65102573789846 75.41881540962333
 part = 1
+[CHASEDB1]
+full_images_to_test = 56
+dataset_mean = 57.2248614789102
+#52.49406625751503
+dataset_std = 57.2248614789102
+#72.00902661330645
+part = 2
 
-[hed]
-num_of_loss = 6
-softmax = 0
-mask_original = 1
-type_of_output = 0
+#training_format:0, input patch,out put center point[0,1];1:input patch，output patch; 2:input fullimages, output fullimages
+#num_of_loss : output loss
+# softmax_index: whether output apply softmax
+#mask_original
+#type_of_output: whether output is in the same shape
+
+[fcnet]
+training_format = 0
+num_of_loss = 1
+softmax_index = 1
+differ_output = 0
 
 [unet]
+training_format = 1
 num_of_loss = 1
-softmax = 1
-mask_original = 0
-type_of_output = 0
+softmax_index  = 1
+differ_output = 0
+
+[hed]
+training_format = 1
+num_of_loss = 4
+softmax_index  = 0
+differ_output = 0
 
 [unet3]
+training_format = 1
 num_of_loss = 4
-softmax = 1
-mask_original = 1
-type_of_output = 0
-
-[unet_dsm]
-num_of_loss = 4
-softmax = 1
-mask_original = 1
-type_of_output = 0
+softmax_index  = 1
+differ_output = 0
 
 [unet4]
+training_format = 1
 num_of_loss = 1
-softmax = 1
-mask_original = 1
-type_of_output = 0
+softmax_index = 1
+differ_output = 0
 
 [unet5]
+training_format = 1
 num_of_loss = 3
-softmax = 1
-mask_original = 1
-type_of_output = 0
+softmax_index = 1
+differ_output = 0
 
 [unet_dm]
+training_format = 1
 num_of_loss = 4
-softmax = 1
-mask_original = 1
-type_of_output = 1
+softmax_index = 1
+differ_output = 1
 
-[unet_atrous]
-num_of_loss = 4
-softmax = 1
-mask_original = 1
-type_of_output = 0
+[unet5l]
+training_format = 1
+num_of_loss = 5
+softmax_index = 1
+differ_output = 0
+
+[unet6l]
+training_format = 1
+num_of_loss = 6
+softmax_index = 1
+differ_output = 0

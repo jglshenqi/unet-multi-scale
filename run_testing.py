@@ -1,14 +1,11 @@
-###################################################
-#
-#   Script to execute the prediction
-#
-##################################################
+# !/usr/bin/env python
+# -*- coding: utf-8 -*-
 
 import os, sys
 import configparser
 
 config = configparser.RawConfigParser()
-config.readfp(open(r'./configuration.txt'))
+config.readfp(open(r'./configuration.txt', encoding='utf-8'))
 name_experiment = config.get('experiment name', 'name')
 nohup = config.getboolean('testing settings', 'nohup')  # std output on log file?
 
@@ -28,7 +25,7 @@ else:
 if nohup:
     print("\n2. Run the prediction on GPU  with nohup")
     os.system(
-        run_GPU + ' python -u ./src/retinaNN_predict.py > ' + './' + name_experiment + '/' + name_experiment + '_prediction.txt')
+        'python -u ./src/retinaNN_predict.py > ' + './' + name_experiment + '/' + name_experiment + '_prediction.txt')
 else:
-    print("\n2. Run the prediction on GPU (no nohup)")
-    os.system(run_GPU + ' python ./src/retinaNN_predict.py')
+    print("\n2.Run the prediction on GPU (no nohup)")
+    os.system('python ./src/retinaNN_predict.py')

@@ -23,62 +23,46 @@ from extract_patches import *
 # pre_processing.py
 from pre_processing import my_PreProc
 import keras.backend.tensorflow_backend as KTF
-
+from keras.backend.tensorflow_backend import set_session
 
 plt.switch_backend('agg')
 sys.path.insert(0, './lib/')
 
 # ========= CONFIG FILE TO READ FROM =======
 config = configparser.RawConfigParser()
-config.read('./configuration.txt')
+config.read('./configuration.txt', encoding='utf-8')
 # ===========================================
 GPU = str(config.get('public', 'GPU'))
 os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
 os.environ["CUDA_VISIBLE_DEVICES"] = GPU
+print("Using GPU ", GPU)
 # run the training on invariant or local
 dataset = config.get('public', 'dataset')
 path_data = config.get('data paths', 'path_local').replace("DRIVE", dataset)
 # original test images (for FOV selection)
-DRIVE_test_imgs_original = path_data + config.get('data paths', 'test_imgs_original').replace("DRIVE", dataset)
-# the border masks provided by the DRIVE
-# DRIVE_test_border_masks = path_data + config.get('data paths', 'test_border_masks').replace("DRIVE",dataset)
-# test_border_masks = load_hdf5(DRIVE_test_border_masks)
-# dimension of the patches
-patch_height = int(config.get('data attributes', 'patch_height'))
-patch_width = int(config.get('data attributes', 'patch_width'))
-# the stride in case output with average
-stride_height = int(config.get('testing settings', 'stride_height'))
-stride_width = int(config.get('testing settings', 'stride_width'))
+
 full_images_to_test = int(config.get(dataset, 'full_images_to_test'))
-assert (stride_height < patch_height and stride_width < patch_width)
 # model name
 name_experiment = config.get('experiment name', 'name')
 path_experiment = './' + name_experiment + '/'
-# N full images to be predicted
-# Imgs_to_test = int(config.get('testing settings', 'full_images_to_test'))
-# Grouping of the predicted images
-N_visual = int(config.get('testing settings', 'N_group_visual'))
 # ====== average mode ===========
 net_name = config.get('public', 'net_config')
 average_mode = config.getboolean('testing settings', 'average_mode')
 num_of_loss = int(config.get(net_name, 'num_of_loss'))
-masks_original = int(config.get(net_name, 'mask_original'))
-softmax = int(config.get(net_name, 'softmax'))
+softmax_index = int(config.get(net_name, 'softmax_index'))
 part = int(config.get(dataset, "part"))
 full_images_to_test = int(full_images_to_test / part)
-type_of_output = int(config.get(net_name, 'type_of_output'))
-color_range_g = int(config.get('public', 'color_range_g'))
+differ_output = int(config.get(net_name, 'differ_output'))
+get_net = str(config.get('public', 'network'))
 
-GPU = str(config.get('public', 'GPU'))
-os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
-os.environ["CUDA_VISIBLE_DEVICES"] = GPU
-
-print("Using GPU ", GPU)
-
+configs = tf.ConfigProto()
+configs.gpu_options.allow_growth = True
+# configs.gpu_options.per_process_gpu_memory_fraction = 0.5
+set_session(tf.Session(config=configs))
 
 # K.clear_session()
 
-if type_of_output == 1:
+if differ_output == 1:
     num_of_loss = 1
 
 
@@ -92,11 +76,9 @@ def get_pred_patches(patches_imgs_test):
     print("patches_imgs_test.shape", patches_imgs_test.shape)
     pred_patches = model.predict(patches_imgs_test, batch_size=4, verbose=2)
 
-    if masks_original == 0:
-        pred = pred_to_imgs(pred_patches, patch_height, patch_width, "original")
-    elif softmax:
+    if softmax_index == 1:
         pred = []
-        if type_of_output == 1:
+        if differ_output == 1:
             pred = down_to_imgs(pred_patches[3], "original")
         elif num_of_loss == 1:
             pred = down_to_imgs(pred_patches, "original")
@@ -112,34 +94,18 @@ def get_pred_patches(patches_imgs_test):
     return pred
 
 
-def visualized(patches_imgs_test, test_mask, pred_patches, test_groundtruth, new_height, new_width, number, counter):
+def visualized(pred_patches, test_mask, new_height, new_width, stride_height, stride_width, number, counter):
     new_path_experiment = path_experiment + str(number) + "/"
     # ========== Elaborate and visualize the predicted images ====================
-    test_imgs_orig = load_hdf5(DRIVE_test_imgs_original)
-    full_img_height = test_imgs_orig.shape[2]
-    full_img_width = test_imgs_orig.shape[3]
-    if average_mode == True:
-        pred_imgs = recompone_overlap(pred_patches, new_height, new_width, stride_height, stride_width)  # predictions
-        orig_imgs = my_PreProc(test_imgs_orig[counter:counter + 1, :, :, :])  # originals
-        gtruth_masks = test_groundtruth  # ground truth masks
-    else:
-        pred_imgs = recompone(pred_patches, 13, 12)  # predictions
-        orig_imgs = recompone(patches_imgs_test, 13, 12)  # originals
-        gtruth_masks = recompone(test_mask, 13, 12)  # masks
+    full_img_height = np.shape(test_mask)[2]
+    full_img_width = np.shape(test_mask)[3]
+    # turn pred patches into images
+    pred_imgs = recompone_overlap(pred_patches, new_height, new_width, stride_height, stride_width)
+    print("pred imgs shape:", pred_imgs.shape)
 
-    orig_imgs = orig_imgs[:, :, 0:full_img_height, 0:full_img_width]
     pred_imgs = pred_imgs[:, :, 0:full_img_height, 0:full_img_width]
-
-    # print(np.shape(pred_imgs), np.shape(test_mask), np.max(test_mask), np.min(test_mask))
-
-    # test_mask = clean_border(test_mask)
-    # pred_imgs = np.array(list(map(lambda x: x[0] * x[1], zip(pred_imgs, test_mask))))
-    # gtruth_masks = np.array(list(map(lambda x: x[0] * x[1], zip(gtruth_masks, test_mask))))
-
-    pred_img = pred_imgs
-
+    # if it os necessary for showing the image in a threshold
     vi_threshold = float(config.get("testing settings", "vi_threshold"))
-
     if vi_threshold:
         print("\nvisualized:  Costum threshold (for positive) of " + str(vi_threshold))
         for i in range(pred_imgs.shape[2]):
@@ -148,30 +114,91 @@ def visualized(patches_imgs_test, test_mask, pred_patches, test_groundtruth, new
                     pred_imgs[0][0][i][j] = 1
                 else:
                     pred_imgs[0][0][i][j] = 0
-
-    gtruth_masks = gtruth_masks[:, :, 0:full_img_height, 0:full_img_width]
-
-    assert (orig_imgs.shape[0] == pred_imgs.shape[0] and orig_imgs.shape[0] == gtruth_masks.shape[0])
-    N_predicted = orig_imgs.shape[0]
-    group = N_visual
-    assert (N_predicted % group == 0)
-
-    gtruth_masks = gtruth_masks / color_range_g
-
-    for i in range(int(N_predicted / group)):
-        orig_stripe = group_images(orig_imgs[i * group:(i * group) + group, :, :, :], group)
-        masks_stripe = group_images(gtruth_masks[i * group:(i * group) + group, :, :, :], group)
-        pred_stripe = group_images(pred_imgs[i * group:(i * group) + group, :, :, :], group)
-        total_img = np.concatenate((orig_stripe, masks_stripe, pred_stripe), axis=0)
-        visualize(total_img, new_path_experiment + name_experiment + "_Original_GroundTruth_Prediction" + str(counter))
-
-    return pred_img, gtruth_masks, gtruth_masks
+    pred_imgs = pred_imgs[0]
+    pred_imgs = np.transpose(pred_imgs, (1, 2, 0))
+    # save the pred images
+    visualize(pred_imgs, new_path_experiment + name_experiment + "_Prediction_" + str(counter))
 
 
-def evaluate_roc(y_true, y_scores, number, i):
-    # Area under the ROC curve
+def predict():
+    for i in range(0, full_images_to_test):
+        print("\n===============the %d/%d round===============" % (i, full_images_to_test))
+        # get the testing patches
+        patches_imgs_test, test_mask, new_height, new_width = get_data_testing_overlap(
+            DRIVE_test_imgs_original=path_data + config.get('data paths', 'test_imgs_original').replace("DRIVE",
+                                                                                                        dataset),
+            DRIVE_test_mask=path_data + config.get('data paths', 'test_border_masks').replace("DRIVE", dataset),
+            start_img=i,
+            patch_height=int(config.get('data attributes', 'patch_height')),
+            patch_width=int(config.get('data attributes', 'patch_width')),
+            stride_height=int(config.get('testing settings', 'stride_height')),
+            stride_width=int(config.get('testing settings', 'stride_width')),
+            color_channel=int(config.get('public', 'color_channel')),
+            training_format=int(config.get(net_name, 'training_format')))
+        # predict rhe testing patches
+        predicision = get_pred_patches(patches_imgs_test)
 
-    fpr, tpr, thresholds = roc_curve((y_true), y_scores)
+        # turn the predictions into images
+        for j in range(num_of_loss):
+            number = j
+            if not os.path.exists(path_experiment + str(number)):
+                os.mkdir(path_experiment + str(number))
+            if num_of_loss == 1:
+                pred_patches = predicision
+            else:
+                pred_patches = predicision[j]
+
+            visualized(pred_patches=pred_patches,
+                       test_mask=test_mask,
+                       new_height=new_height,
+                       new_width=new_width,
+                       stride_height=int(config.get('testing settings', 'stride_height')),
+                       stride_width=int(config.get('testing settings', 'stride_width')),
+                       number=number,
+                       counter=i)
+
+
+def get_datasets(imgs_dir):
+    print(imgs_dir)
+    imgs = None
+    for path, subdirs, files in os.walk(imgs_dir):
+
+        img = Image.open(path + files[0])
+        size = np.shape(img)
+        print("the shape of images is:", np.shape(img))
+
+        if np.array(size).shape[0] == 2:
+            size = [size[0], size[1], 1]
+
+        imgs = np.zeros((len(files), size[0], size[1], size[2]))
+
+        for i in range(len(files)):
+            file = name_experiment + "_Prediction_" + str(i) + ".png"
+            # file = files[i]
+            print(imgs_dir + file)
+            img = Image.open(imgs_dir + file)
+            img = np.array(img)
+
+            if np.shape(img.shape)[0] == 2:
+                img = img.reshape((img.shape[0], img.shape[1], 1))
+            imgs[i] = img
+
+        imgs = np.transpose(imgs, (0, 3, 1, 2))
+        # show_img(imgs)
+
+    return imgs
+
+
+def prepare_data(urls_original, urls_save):
+    for i in range(urls_original.__len__()):
+        img = get_datasets(urls_original[i])
+        write_hdf5(img, urls_save[i])
+
+
+def evaluate_roc(y_true, y_scores, save_url):
+    fpr, tpr, thresholds = roc_curve(y_true, y_scores)
+    # print(y_scores.max(),y_scores.min(),y_scores.sum())
+    # print(y_true.max(), y_true.min(), y_true.sum())
     AUC_ROC = roc_auc_score(y_true, y_scores)
     # test_integral = np.trapz(tpr,fpr) #trapz is numpy integration
     print("\nArea under the ROC curve: " + str(AUC_ROC))
@@ -181,12 +208,12 @@ def evaluate_roc(y_true, y_scores, number, i):
     plt.xlabel("FPR (False Positive Rate)")
     plt.ylabel("TPR (True Positive Rate)")
     plt.legend(loc="lower right")
-    plt.savefig(path_experiment + "%d/ROC%d.png" % (number, i))
+    plt.savefig(save_url + "ROC.png")
 
     return AUC_ROC
 
 
-def evaluate_prc(y_true, y_scores, number, i):
+def evaluate_prc(y_true, y_scores, save_url):
     # Precision-recall curve
     precision, recall, thresholds = precision_recall_curve(y_true, y_scores)
     precision = np.fliplr([precision])[0]  # so the array is increasing (you won't get negative AUC)
@@ -199,7 +226,7 @@ def evaluate_prc(y_true, y_scores, number, i):
     plt.xlabel("Recall")
     plt.ylabel("Precision")
     plt.legend(loc="lower right")
-    plt.savefig(path_experiment + "%d/Precision_recall%d.png" % (number, i))
+    plt.savefig(save_url + "Precision_recall.png")
 
     return AUC_prec_rec
 
@@ -252,17 +279,15 @@ def F1_s(y_true, y_pred):
     return F1_score
 
 
-def evaluate(y_true, y_scores, number=0, i=0, result=[]):
-    y_true = y_true / color_range_g
-    y_scores = y_scores / color_range_g
-    AUC_ROC = evaluate_roc(y_true, y_scores, number, i)
-    AUC_prec_rec = evaluate_prc(y_true, y_scores, number, i)
+def evaluate(y_true, y_scores, save_url):
+    AUC_ROC = evaluate_roc(y_true, y_scores, save_url)
+    AUC_prec_rec = evaluate_prc(y_true, y_scores, save_url)
     confusion, y_pred, accuracy, specificity, sensitivity, precision = confusion_matrixd(y_true, y_scores)
     jaccard_index = jacs(y_true, y_pred)
     F1_score = F1_s(y_true, y_pred)
 
     # Save the results
-    file_perf = open(path_experiment + '/%d/performances%d.txt' % (number, i), 'w')
+    file_perf = open(save_url + 'performance.txt', 'w')
     file_perf.write("Area under the ROC curve: " + str(AUC_ROC)
                     + "\nArea under Precision-Recall curve: " + str(AUC_prec_rec)
                     + "\nJaccard similarity score: " + str(jaccard_index)
@@ -276,107 +301,56 @@ def evaluate(y_true, y_scores, number=0, i=0, result=[]):
                     )
     file_perf.close()
 
-    result[number][0] = result[number][0] + AUC_ROC
-    result[number][1] = result[number][1] + AUC_prec_rec
-    result[number][2] = result[number][2] + jaccard_index
-    result[number][3] = result[number][3] + F1_score
 
-    file_perf = open(path_experiment + '/%d/performances_all.txt' % number, 'w')
-    file_perf.write("Area under the ROC curve: " + str(result[number][0])
-                    + "\nArea under Precision-Recall curve: " + str(result[number][1])
-                    + "\nJaccard similarity score: " + str(result[number][2])
-                    + "\nF1 score (F-measure): " + str(result[number][3])
-                    )
-    file_perf.close()
-
-    return result
+def show_img(img):
+    imgs = []
+    for i in range(img.shape[0]):
+        temp = img[i][0]
+        imgs.extend(temp)
+    print(np.shape(imgs))
+    Image.fromarray(np.array(imgs)).show()
 
 
-def predict(round, result):
-    patches_imgs_test = None
-    new_height = None
-    new_width = None
-    masks_test = None
-    patches_masks_test = None
-    predicision = None
-    masks_test = None
-    y_trues = None
-    y_scores = None
-    y_score = None
-    y_true = None
+def evalu_roc(dataset, net, save_url):
+    mask_url = path_data + config.get('data paths', 'test_border_masks').replace("DRIVE", dataset)
 
-    for i in range(round * full_images_to_test, (round + 1) * full_images_to_test):
-        print("\n===============the %d/%d round===============" % (i, (round + 1) * full_images_to_test))
-        start_time = time.time()
-        if average_mode == True:
-            patches_imgs_test, new_height, new_width, test_groundtruth, test_mask = get_data_testing_overlap(
-                DRIVE_test_imgs_original=DRIVE_test_imgs_original,  # original
-                DRIVE_test_groudTruth=path_data + config.get('data paths', 'test_groundTruth').replace("DRIVE",
-                                                                                                       dataset),
-                # masks
-                DRIVE_test_mask=path_data + config.get('data paths', 'test_border_masks').replace("DRIVE",
-                                                                                                  dataset),
-                patch_height=patch_height,
-                patch_width=patch_width,
-                stride_height=stride_height,
-                stride_width=stride_width,
-                color_channel=int(config.get('public', 'color_channel')),
-                number=i,
-                color_range_o=int(config.get('public', 'color_range_o')),
-                color_range_g=color_range_g
-            )
-        else:
-            patches_imgs_test, patches_masks_test = get_data_testing(
-                DRIVE_test_imgs_original=DRIVE_test_imgs_original,  # original
-                DRIVE_test_groudTruth=path_data + config.get('data paths', 'test_groundTruth').replace("DRIVE",
-                                                                                                       dataset),
-                # masks
-                Imgs_to_test=int(config.get('testing settings', 'full_images_to_test')),
-                patch_height=patch_height,
-                patch_width=patch_width,
-            )
-        predicision = get_pred_patches(patches_imgs_test)
+    gtruth_url = path_data + config.get('data paths', 'test_groundTruth').replace("DRIVE", dataset)
+    pred_url = save_url + dataset + "_" + net + ".hdf5"
 
-        for j in range(num_of_loss):
-            number = j
-            if not os.path.exists(path_experiment + str(number)):
-                os.mkdir(path_experiment + str(number))
-            if num_of_loss == 1:
-                pred_patches = predicision
-            else:
-                pred_patches = predicision[j]
+    y_true = load_hdf5(gtruth_url) / 255
+    y_pred = load_hdf5(pred_url) / 255
+    mask = load_hdf5(mask_url) / 255
+    print("test", y_true.max(), y_pred.max(), mask.max(), y_true.min(), y_pred.min(), mask.min())
+    print(y_true.shape, y_pred.shape, mask.shape)
 
-            pred_imgs, gtruth_masks, test_groundtruth = visualized(patches_imgs_test, test_mask, pred_patches,
-                                                                   test_groundtruth, new_height, new_width, number, i)
+    # show_img(y_true * 255)
+    # show_img(y_pred * 255)
+    # stop = input()
 
-            score, true = pred_only_FOV(pred_imgs, gtruth_masks)  # returns data only inside the FOV
+    score, true = pred_only_FOV(y_pred, y_true, mask)
+    print(true.max(), true.min())
 
-            if j == 0:
-                y_score = score
-                y_true = true
-            else:
-                y_score = np.concatenate((y_score, score), axis=1)
-                y_true = np.concatenate((y_true, true), axis=1)
-
-        if i % full_images_to_test == 0:
-            y_scores = y_score
-            y_trues = y_true
-        else:
-            y_scores = np.concatenate((y_scores, y_score), axis=0)
-            y_trues = np.concatenate((y_trues, y_true), axis=0)
-
-        print("======all cost %ds======" % (int(time.time() - start_time)))
-
-    for i in range(num_of_loss):
-        number = i
-        result = evaluate(y_trues[:, i:i + 1], y_scores[:, i:i + 1], number, round, result)
-
-    return result
+    evaluate(true, score, save_url)
 
 
 if __name__ == '__main__':
-    result = []
-    for i in range(num_of_loss):
-        result.append([0, 0, 0, 0])
-    for i in range(part):
-        result = predict(i, result)
+    start_time = time.time()
+    # get the pred images and save
+    print("=======predict the images=======")
+    # predict()
+    print("Prediction ended,it costs", str(int(time.time() - start_time)) + " seconds")
+    start_time = time.time()
+
+    # turn the pred images into hdf5 files,just for last output
+    print("=======transfer images to hdf5=======")
+    url_original = [path_experiment + str(num_of_loss - 1) + "/"]
+    url_save = [path_experiment + dataset + "_" + get_net + ".hdf5"]
+    prepare_data(url_original, url_save)
+    print("Transfering ended,it costs", str(int(time.time() - start_time)) + " seconds")
+    start_time = time.time()
+
+    # evaluate the results from hdf5 files
+    print("=======evaluate=======")
+    evalu_roc(dataset, get_net, path_experiment)
+    print("Evaluation ended,it costs", str(int(time.time() - start_time)) + " seconds")
+    start_time = time.time()
