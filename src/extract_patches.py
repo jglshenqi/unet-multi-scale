@@ -2,7 +2,7 @@ import random
 from help_functions import *
 import skimage.measure
 
-from pre_processing import my_PreProc, color_PreProc
+from pre_processing import my_PreProc, color_PreProc, show_image
 
 
 # preprocessing for both training and testing
@@ -56,18 +56,21 @@ def get_data_training(DRIVE_train_imgs_original,
     # preprocessing of the images,result is between [0,1]
     train_imgs = preprocessing(train_imgs, color_channel)
     train_gtruth = train_gtruth / 255
+    # show_image(train_imgs[0][0])
 
     print("train images shape:", train_imgs.shape,
           "train images range (min-max): " + str(np.min(train_imgs)) + ' - ' + str(np.max(train_imgs)))
     print("train gtruth shape:", train_gtruth.shape,
           "train gtruth range (min-max): " + str(np.min(train_gtruth)) + ' - ' + str(np.max(train_gtruth)))
+    # stop = input()
 
     # extract the TRAINING patches from the full images
     patches_imgs_train = []
     patches_gtruth_train = []
+    print(training_format)
     if training_format == 0:
-        patch_width = 49
-        patch_height = 49
+        # patch_width = 49
+        # patch_height = 49
         N_subimgs = 400000
         patches_imgs_train, patches_gtruth_train = extract_random(train_imgs,
                                                                   train_gtruth,
@@ -81,6 +84,8 @@ def get_data_training(DRIVE_train_imgs_original,
                                                                       patch_width,
                                                                       train_coordinate)
     elif training_format == 2:
+        print(train_imgs.shape)
+
         patches_imgs_train = train_imgs
         patches_gtruth_train = train_gtruth
 
@@ -102,6 +107,7 @@ def get_data_testing_overlap(DRIVE_test_imgs_original,
                              training_format):
     # load images from hdf5 file
     test_imgs_original = load_hdf5(DRIVE_test_imgs_original)
+    print("test imgs_original shape:", test_imgs_original.shape)
     test_mask = load_hdf5(DRIVE_test_mask)
     # preprocessing of the test
     test_imgs = preprocessing(test_imgs_original, color_channel)
@@ -115,8 +121,8 @@ def get_data_testing_overlap(DRIVE_test_imgs_original,
     # get the patches for test in different conditions
     patches_imgs_test = []
     if training_format == 0:
-        patch_width = 49
-        patch_height = 49
+        # patch_width = 49
+        # patch_height = 49
         stride_height = 1
         stride_width = 1
         patches_imgs_test = extract_ordered_overlap(test_imgs,
@@ -260,6 +266,19 @@ def extract_ordered_overlap(full_imgs, patch_h, patch_w, stride_h, stride_w):
                 iter_tot += 1  # total
     assert (iter_tot == N_patches_tot)
     return patches  # array with all the full_imgs divided in patches
+
+
+def recompone_image(pred_patches,full_img_height,full_img_width,patch_height,patch_width):
+    temp = int(patch_height/2)
+    k = 0
+    img = np.zeros(shape=(1,1,full_img_height,full_img_width))
+    for i in range(temp, full_img_height - temp):
+        for j in range(temp, full_img_width-temp):
+            img[0][0][i][j] = pred_patches[k]
+            k = k+1
+    print(k,np.sum(pred_patches))
+    return img
+
 
 
 # recover the predictions if it is extended

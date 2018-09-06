@@ -20,16 +20,27 @@ dataset_mean = float(config.get(dataset, 'dataset_mean'))
 dataset_std = float(config.get(dataset, 'dataset_std'))
 
 
+def show_image(img):
+    print(np.max(img), np.min(img))
+    img = Image.fromarray(img)
+    img.show()
+
+
 # pre processing for grey_scale images(use for both training and testing!)
 def my_PreProc(data):
     assert (len(data.shape) == 4)
     assert (data.shape[1] == 3)  # Use the original images
     # black-white conversion
     train_imgs = rgb2gray(data)
+    # show_image(train_imgs[0][0])
+
     # my preprocessing:
     train_imgs = dataset_normalized(train_imgs)
+    # show_image(train_imgs[0][0])
     train_imgs = clahe_equalized(train_imgs)
+    # show_image(train_imgs[0][0])
     train_imgs = adjust_gamma(train_imgs, 1.2)
+    # show_image(train_imgs[0][0])
     return train_imgs
 
 

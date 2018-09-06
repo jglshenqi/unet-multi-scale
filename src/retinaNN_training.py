@@ -9,6 +9,7 @@ import os
 import time
 import tensorflow as tf
 from keras.backend.tensorflow_backend import set_session
+from keras.callbacks import TensorBoard
 
 # ========= Load settings from Config file
 config = configparser.RawConfigParser()
@@ -56,13 +57,11 @@ def save_config():
     file.close()
 
 
-def save_sample(patches_imgs_train, patches_masks_train):
+def save_sample(patches_imgs_train):
     # ========= Save a sample of what you're feeding to the neural network ==========
     N_sample = min(patches_imgs_train.shape[0], 40)
     visualize(group_images(patches_imgs_train[0:N_sample, :, :, :], 5),
               './' + name_experiment + '/' + "sample_input_imgs")  # .show()
-    visualize(group_images(patches_masks_train[0:N_sample, :, :, :], 5),
-              './' + name_experiment + '/' + "sample_input_masks")  # .show()
 
 
 # load the training network
@@ -73,6 +72,8 @@ def get_model(shape):
 
     if get_net == "unet":
         model = network.get_unet(n_ch, patch_height, patch_width)
+    elif get_net == "fcn":
+        model = network.get_fcn(n_ch, patch_height, patch_width)
     elif get_net == "hed":
         model = network.get_hed(n_ch, patch_height, patch_width)
     elif get_net == "unet3":
@@ -101,6 +102,12 @@ def get_model(shape):
         model = network.get_unet6l(n_ch, patch_height, patch_width)
     elif get_net == "unet_brnew":
         model = network.get_unet_brnew(n_ch, patch_height, patch_width)
+    elif get_net == "hed_crf":
+        model = network.get_hedcrf(n_ch, patch_height, patch_width)
+    elif get_net == "unet3_com":
+        model = network.get_unet3_combine(n_ch, patch_height, patch_width)
+    elif get_net == "demo":
+        model = network.get_demo(n_ch, patch_height, patch_width)
     else:
         print("Please input a correct network!")
         exit(0)
@@ -166,7 +173,8 @@ def train():
         num_of_loss=int(config.get(net_name, 'num_of_loss')),
         softmax_index=int(config.get(net_name, 'softmax_index')),
         differ_output=int(config.get(net_name, 'differ_output')))
-    # save_sample(patches_imgs_train,patches_masks_train)
+    # save_sample(patches_imgs_train)
+    # save_sample(patches_masks_train)
 
     print("")
     model = get_model(patches_imgs_train.shape)
@@ -178,14 +186,31 @@ def train():
                                    monitor=stop_loss,
                                    mode='auto',
                                    save_best_only=True)  # save at each epoch if the validation decreased
-    history = LossHistory()
-    model.fit(patches_imgs_train, patches_masks_train,
-              epochs=N_epochs, batch_size=batch_size, verbose=2,
-              shuffle=True, validation_split=0.1, callbacks=[checkpointer, history])
+    log_path = './log'
+    for i in os.listdir(log_path):
+        path_file = os.path.join(log_path, i)
+        print(path_file)
+        os.remove(path_file)
+    board = TensorBoard(log_dir=log_path,
+                        histogram_freq=0,
+                        batch_size=batch_size,
+                        write_graph=1,
+                        write_grads=0,
+                        write_images=0,
+                        embeddings_freq=0,
+                        embeddings_layer_names=['oo1', 'oo2'],
+                        embeddings_metadata=['./log/1.txt', './log/2.txt'])
+    model.fit(patches_imgs_train,
+              patches_masks_train,
+              epochs=N_epochs,
+              batch_size=batch_size,
+              verbose=2,
+              shuffle=True,
+              validation_split=0.1,
+              callbacks=[checkpointer, board])
 
     # ========== Save the last model ===================
     model.save_weights('./' + name_experiment + '/' + name_experiment + '_last_weights.h5', overwrite=True)
-    history.loss_plot('epoch')
 
 
 if __name__ == '__main__':

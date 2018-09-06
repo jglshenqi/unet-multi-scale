@@ -1,6 +1,6 @@
 from keras.models import Model
-from keras.layers import Input, concatenate, Conv2D, MaxPooling2D, UpSampling2D, Reshape, core, \
-    Dropout, convolutional, Conv2DTranspose, Concatenate, Activation, Flatten, Dense
+from keras.layers import Input, concatenate, Conv2D, MaxPooling2D, UpSampling2D, Reshape, core, Dropout, convolutional, \
+    Conv2DTranspose, Concatenate, Activation, Flatten, Dense, ZeroPadding2D, Cropping2D, Add
 from keras import backend
 from keras.activations import softmax
 import keras
@@ -10,14 +10,32 @@ import help_functions
 import numpy as np
 from keras.layers import Lambda
 import configparser
+import sys
 
-config = configparser.RawConfigParser()
-config.read('./configuration.txt',encoding='utf-8')
-loss_w = [1, 2, 3, 4]
-loss_w[0] = float(config.get('public', 'loss_weight_0'))
-loss_w[1] = float(config.get('public', 'loss_weight_1'))
-loss_w[2] = float(config.get('public', 'loss_weight_2'))
-loss_w[3] = float(config.get('public', 'loss_weight_3'))
+
+# from keras.engine.topology import Layer
+# import high_dim_filter_loader
+# custom_module = high_dim_filter_loader.custom_module
+
+
+def _diagonal_initializer(shape):
+    return np.eye(shape[0], shape[1], dtype=np.float32)
+
+
+def _potts_model_initializer(shape):
+    return -1 * _diagonal_initializer(shape)
+
+
+def get_lossweight():
+    config = configparser.RawConfigParser()
+    config.read('./configuration.txt', encoding='utf-8')
+    loss_w = [1, 2, 3, 4]
+    loss_w[0] = float(config.get('public', 'loss_weight_0'))
+    loss_w[1] = float(config.get('public', 'loss_weight_1'))
+    loss_w[2] = float(config.get('public', 'loss_weight_2'))
+    loss_w[3] = float(config.get('public', 'loss_weight_3'))
+
+    return loss_w
 
 
 def side_branch(x, factor):
@@ -165,13 +183,78 @@ def Boundary_Refinement2(inside):
     return add
 
 
+def get_fcn(n_ch, patch_height, patch_width):
+    inputs = Input(shape=(n_ch, patch_height, patch_width))
+    conv1 = Conv2D(64, (3, 3), activation='relu', padding='same', data_format='channels_first')(inputs)
+    pool1 = MaxPooling2D((2, 2), strides=(2, 2), data_format='channels_first')(conv1)
+    print('conv1 = ', conv1.shape, 'pool1 = ', pool1.shape)
+
+    # Block 2
+    conv2 = Conv2D(128, (3, 3), activation='relu', padding='same', data_format='channels_first')(pool1)
+    conv2 = Conv2D(128, (3, 3), activation='relu', padding='same', data_format='channels_first')(conv2)
+    pool2 = MaxPooling2D((2, 2), strides=(2, 2), data_format='channels_first')(conv2)
+    print('conv2 = ', conv2.shape, 'pool2 = ', pool2.shape)
+
+    # Block 3
+    conv3 = Conv2D(256, (3, 3), activation='relu', padding='same', data_format='channels_first')(pool2)
+    conv3 = Conv2D(256, (3, 3), activation='relu', padding='same', data_format='channels_first')(conv3)
+    conv3 = Conv2D(256, (3, 3), activation='relu', padding='same', data_format='channels_first')(conv3)
+    pool3 = MaxPooling2D((2, 2), strides=(2, 2), data_format='channels_first')(conv3)
+    print('conv3 = ', conv3.shape, 'pool3 = ', pool3.shape)
+
+    # Block 4
+    conv4 = Conv2D(512, (3, 3), activation='relu', padding='same', data_format='channels_first')(pool3)
+    conv4 = Conv2D(512, (3, 3), activation='relu', padding='same', data_format='channels_first')(conv4)
+    conv4 = Conv2D(512, (3, 3), activation='relu', padding='same', data_format='channels_first')(conv4)
+    pool4 = MaxPooling2D((2, 2), strides=(2, 2), data_format='channels_first')(conv4)
+    print('conv4 = ', conv4.shape, 'pool1 = ', pool4.shape)
+
+    # Block 5
+    conv5 = Conv2D(512, (3, 3), activation='relu', padding='same', data_format='channels_first')(pool4)
+    conv5 = Conv2D(512, (3, 3), activation='relu', padding='same', data_format='channels_first')(conv5)
+    conv5 = Conv2D(512, (3, 3), activation='relu', padding='same', data_format='channels_first')(conv5)
+    pool5 = MaxPooling2D((2, 2), strides=(2, 2), data_format='channels_first')(conv5)
+    print('conv5 = ', conv5.shape, 'pool5 = ', pool5.shape)
+
+    conv6 = Conv2D(4096, (1, 1), activation='relu', padding='valid', data_format='channels_first')(pool5)
+    conv6 = Dropout(0.5)(conv6)
+    print('conv6 = ', conv6.shape)
+
+    conv7 = Conv2D(4096, (1, 1), activation='relu', padding='same', data_format='channels_first')(conv6)
+    conv7 = Dropout(0.5)(conv7)
+    conv7 = Conv2D(2, (1, 1), padding='valid', data_format='channels_first')(conv7)
+    print('conv7 = ', conv7.shape)
+
+    convt1 = Conv2DTranspose(2, (4, 4), strides=2, padding='same', data_format='channels_first')(conv7)
+    print(convt1.shape)
+    pool4 = Conv2D(2, (1, 1), padding='valid', data_format='channels_first')(pool4)
+    print(pool4.shape)
+    add1 = keras.layers.Add()([convt1, pool4])
+    print('convt1 = ', convt1.shape, "add1 = ", add1.shape)
+
+    convt2 = Conv2DTranspose(2, (4, 4), strides=2, padding='same', data_format='channels_first')(add1)
+    pool3 = Conv2D(2, (1, 1), padding='valid', data_format='channels_first')(pool3)
+    add2 = keras.layers.Add()([convt2, pool3])
+    print('convt2 = ', convt2.shape, "add2 = ", add2.shape)
+
+    output = Conv2DTranspose(2, (16, 16), strides=8, padding='same', data_format='channels_first')(add2)
+    output = core.Activation('softmax')(output)
+    print('output = ', output.shape)
+
+    model = Model(inputs=[inputs], outputs=[output])
+    loss = cross_entropy_balanced
+    # loss = 'categorical_crossentropy'
+    model.compile(optimizer='sgd', loss=loss, metrics=['accuracy'])
+    return model
+
+
 def get_fcnet(n_ch, patch_height, patch_width):
     inputs = Input(shape=(n_ch, patch_height, patch_width))
 
     conv1 = Conv2D(64, (4, 4), activation='relu', padding='valid', data_format='channels_first')(inputs)
-    conv1 = Dropout(0.5)(conv1)
+    # conv1 = Dropout(0.5)(conv1)
     conv1 = Conv2D(64, (3, 3), activation='relu', padding='same', data_format='channels_first')(conv1)
-    conv1 = Dropout(0.5)(conv1)
+    # conv1 = Dropout(0.5)(conv1)
     pool1 = MaxPooling2D((2, 2), padding='valid', data_format='channels_first')(conv1)
     #
     conv2 = Conv2D(128, (3, 3), activation='relu', padding='same', data_format='channels_first')(pool1)
@@ -181,8 +264,10 @@ def get_fcnet(n_ch, patch_height, patch_width):
 
     pool2_delt = Flatten()(pool2)
     conv3 = Dense(512, activation='relu')(pool2_delt)
+    conv3 = Dropout(0.5)(conv3)
     conv4 = Dense(512, activation='relu')(conv3)
-    conv5 = Dense(2, activation='relu')(conv4)
+    conv4 = Dropout(0.5)(conv4)
+    conv5 = Dense(2)(conv4)
 
     ############
     conv6 = core.Activation('softmax')(conv5)
@@ -190,7 +275,9 @@ def get_fcnet(n_ch, patch_height, patch_width):
     model = Model(input=inputs, output=conv6)
 
     # sgd = SGD(lr=0.01, decay=1e-6, momentum=0.3, nesterov=False)
-    model.compile(optimizer='sgd', loss='categorical_crossentropy', metrics=['accuracy'])
+    # loss = cross_entropy_balanced
+    loss = 'categorical_crossentropy'
+    model.compile(optimizer='sgd', loss=loss, metrics=['accuracy'])
 
     return model
 
@@ -230,20 +317,112 @@ def get_unet(n_ch, patch_height, patch_width):
     conv5 = Conv2D(16, (3, 3), activation='relu', padding='same', data_format='channels_first')(conv5)
     print("up2 = ", up2, "conv5 = ", conv5.shape)
     #
-    conv6 = Conv2D(2, (1, 1), activation='relu', padding='same', data_format='channels_first')(conv5)
+    conv6 = Conv2D(2, (1, 1), padding='same', data_format='channels_first')(conv5)
 
     print("conv6 = ", conv6.shape)
     ############
-    conv7 = core.Activation('softmax', name='last')(conv6)
+    conv7 = core.Permute((2, 3, 1))(conv6)
+    conv7 = core.Activation('softmax')(conv7)
+    conv7 = core.Permute((3, 1, 2))(conv7)
     print("conv7 = ", conv7.shape)
 
     model = Model(input=inputs, output=conv7)
 
+    # conv6 = Conv2D(2, (1, 1), activation='relu', padding='same', data_format='channels_first')(conv5)
+    # print(conv6.shape)
+    # conv6 = core.Reshape((2, patch_height * patch_width))(conv6)
+    # print(conv6.shape)
+    # conv6 = core.Permutre((2, 1))(conv6)
+    # print(conv6.shape)
+    # ############
+    # conv7 = core.Activation('softmax')(conv6)
+    #
+    # model = Model(input=inputs, output=conv7)
+
     # sgd = SGD(lr=0.01, decay=1e-6, momentum=0.3, nesterov=False)
-    #compile(self, optimizer, loss=None, metrics=None, loss_weights=None, sample_weight_mode=None, weighted_metrics=None,
-            #target_tensors=None)
+    # compile(self, optimizer, loss=None, metrics=None, loss_weights=None, sample_weight_mode=None, weighted_metrics=None,
+    # target_tensors=None)
     model.compile(optimizer='sgd', loss='categorical_crossentropy', metrics=['accuracy'])
 
+    return model
+
+
+def get_hedcrf(n_ch, patch_height, patch_width):
+    sys.path.insert(0, './CRF/')
+    from crfrnn_layer import CrfRnnLayer
+
+    print("=====Using the network hed-crf======")
+    inputs = Input(shape=(n_ch, patch_height, patch_width))
+    conv1 = Conv2D(64, (3, 3), activation='relu', padding='same', data_format='channels_first')(inputs)
+    conv1 = Conv2D(64, (3, 3), activation='relu', padding='same', data_format='channels_first')(conv1)
+    out1 = side_branch(conv1, 1)
+    print('conv1 = ', conv1.shape)
+
+    # Block 2
+    pool1 = MaxPooling2D((2, 2), strides=(2, 2), data_format='channels_first')(conv1)
+    conv2 = Conv2D(128, (3, 3), activation='relu', padding='same', data_format='channels_first')(pool1)
+    conv2 = Conv2D(128, (3, 3), activation='relu', padding='same', data_format='channels_first')(conv2)
+    conv2 = Conv2D(128, (3, 3), activation='relu', padding='same', data_format='channels_first')(conv2)
+    out2 = side_branch(conv2, 2)
+    print('pool1 = ', pool1.shape, 'conv2 = ', conv2.shape)
+
+    # Block 3
+    pool2 = MaxPooling2D((2, 2), strides=(2, 2), data_format='channels_first')(conv2)
+    conv3 = Conv2D(256, (3, 3), activation='relu', padding='same', data_format='channels_first')(pool2)
+    conv3 = Conv2D(256, (3, 3), activation='relu', padding='same', data_format='channels_first')(conv3)
+    conv3 = Conv2D(256, (3, 3), activation='relu', padding='same', data_format='channels_first')(conv3)
+    out3 = side_branch(conv3, 4)
+    print('pool2 = ', pool2.shape, 'conv3 = ', conv3.shape)
+
+    # Block 4
+    pool3 = MaxPooling2D((2, 2), strides=(2, 2), data_format='channels_first')(conv3)
+    conv4 = Conv2D(512, (3, 3), activation='relu', padding='same', data_format='channels_first')(pool3)
+    conv4 = Conv2D(512, (3, 3), activation='relu', padding='same', data_format='channels_first')(conv4)
+    conv4 = Conv2D(512, (3, 3), activation='relu', padding='same', data_format='channels_first')(conv4)
+    out4 = side_branch(conv4, 8)
+    print('pool3 = ', pool3.shape, 'conv4 = ', conv4.shape, 'out4 = ', out4.shape)
+
+    fuse = concatenate([out1, out2, out3, out4], axis=1)
+
+    fuse = Conv2D(1, (1, 1), padding='same', data_format="channels_first")(fuse)
+    fuse = core.Permute((2, 3, 1))(fuse)
+    input = core.Permute((2, 3, 1))(inputs)
+
+    # out1 = core.Permute((2, 3, 1))(out1)
+    # out2 = core.Permute((2, 3, 1))(out2)
+    # out3 = core.Permute((2, 3, 1))(out3)
+    # out4 = core.Permute((2, 3, 1))(out4)
+    # #
+    # out1 = core.Activation('softmax', name='o1')(out1)
+    # out2 = core.Activation('softmax', name='o2')(out2)
+    # out3 = core.Activation('softmax', name='o3')(out3)
+    # out4 = core.Activation('softmax', name='o4')(out4)
+    # fuse = core.Activation('softmax')(fuse)
+    # print("test")
+    activ = "sigmoid"
+    out1 = Activation(activ, name='o1')(out1)
+    out2 = Activation(activ, name='o2')(out2)
+    out3 = Activation(activ, name='o3')(out3)
+    out4 = Activation(activ, name='o4')(out4)
+
+    fuse = CrfRnnLayer(image_dims=(patch_height, patch_width),
+                       num_classes=2,
+                       theta_alpha=160.,
+                       theta_beta=3.,
+                       theta_gamma=3.,
+                       num_iterations=10,
+                       name='crfrnn')([fuse, input])
+    #
+    # out1 = core.Permute((3, 1, 2), name='oo1')(out1)
+    # out2 = core.Permute((3, 1, 2), name='oo2')(out2)
+    # out3 = core.Permute((3, 1, 2), name='oo3')(out3)
+    # out4 = core.Permute((3, 1, 2), name='oo4')(out4)
+    fuse = core.Permute((3, 1, 2), name='last')(fuse)
+
+    model = Model(inputs=[inputs], outputs=[out1, out2, out3, out4, fuse])
+    loss = cross_entropy_balanced
+    # loss = 'categorical_crossentropy'
+    model.compile(optimizer='sgd', loss=loss, metrics=['accuracy'])
     return model
 
 
@@ -313,6 +492,7 @@ def get_unet2(n_ch, patch_height, patch_width):
 
 
 def get_unet3(n_ch, patch_height, patch_width):
+    loss_w = get_lossweight()
     print("=====Using unet3 (softmax)=====")
     inputs = Input(shape=(n_ch, patch_height, patch_width))
     conv1 = Conv2D(32, (3, 3), activation='relu', padding='same', data_format='channels_first')(inputs)
@@ -342,6 +522,78 @@ def get_unet3(n_ch, patch_height, patch_width):
     print("up1 = ", up1.shape, "conv4 = ", conv4.shape, "out2 = ", out2.shape)
     #
     up2 = UpSampling2D(size=(2, 2), data_format='channels_first')(conv4)
+    up2 = concatenate([conv1, up2], axis=1)
+    conv5 = Conv2D(32, (3, 3), activation='relu', padding='same', data_format='channels_first')(up2)
+    conv5 = Dropout(0.2)(conv5)
+    conv5 = Conv2D(32, (3, 3), activation='relu', padding='same', data_format='channels_first')(conv5)
+    out3 = side_branch2(conv5, 1)
+    print("up2 = ", up2.shape, "conv5 = ", conv5.shape, "out3 = ", out3.shape)
+    #
+    fuse = concatenate([out1, out2, out3], axis=1)
+    fuse = Conv2D(2, (1, 1), activation='relu', padding='same', data_format='channels_first')(fuse)
+    print("fuse = ", fuse.shape)
+
+    out1 = core.Permute((2, 3, 1))(out1)
+    out2 = core.Permute((2, 3, 1))(out2)
+    out3 = core.Permute((2, 3, 1))(out3)
+    fuse = core.Permute((2, 3, 1))(fuse)
+    #
+    out1 = core.Activation('softmax', name='o1')(out1)
+    out2 = core.Activation('softmax', name='o2')(out2)
+    out3 = core.Activation('softmax', name='o3')(out3)
+    fuse = core.Activation('softmax', name='ofuse')(fuse)
+    #
+    out1 = core.Permute((3, 1, 2), name='oo1')(out1)
+    out2 = core.Permute((3, 1, 2), name='oo2')(out2)
+    out3 = core.Permute((3, 1, 2), name='oo3')(out3)
+    fuse = core.Permute((3, 1, 2), name='last')(fuse)
+
+    print("out1 = ", out1.shape, "out2 = ", out2.shape, "out3 = ", out3.shape, "fuse = ", fuse.shape)
+    # # model
+    model = Model(inputs=[inputs], outputs=[out1, out2, out3, fuse])
+    loss = cross_entropy_balanced
+    # loss = 'categorical_crossentropy'
+    model.compile(optimizer='sgd', loss={'oo1': loss,
+                                         'oo2': loss,
+                                         'oo3': loss,
+                                         'last': loss, }, loss_weights=loss_w, metrics=['accuracy'])
+
+    return model
+
+
+def get_unet3_combine(n_ch, patch_height, patch_width):
+    loss_w = [1, 1, 1, 1]
+    print("=====Using unet3_combine=====")
+    inputs = Input(shape=(n_ch, patch_height, patch_width))
+    conv1 = Conv2D(32, (3, 3), activation='relu', padding='same', data_format='channels_first')(inputs)
+    conv1 = Dropout(0.2)(conv1)
+    conv1 = Conv2D(32, (3, 3), activation='relu', padding='same', data_format='channels_first')(conv1)
+    pool1 = MaxPooling2D((2, 2), data_format='channels_first')(conv1)
+    print("conv1 = ", conv1.shape, "pool1 = ", pool1.shape)
+    #
+    conv2 = Conv2D(64, (3, 3), activation='relu', padding='same', data_format='channels_first')(pool1)
+    conv2 = Dropout(0.2)(conv2)
+    conv2 = Conv2D(64, (3, 3), activation='relu', padding='same', data_format='channels_first')(conv2)
+    pool2 = MaxPooling2D((2, 2), data_format='channels_first')(conv2)
+    print("conv2 = ", conv2.shape, "pool2 = ", pool2.shape)
+    #
+    conv3 = Conv2D(128, (3, 3), activation='relu', padding='same', data_format='channels_first')(pool2)
+    conv3 = Dropout(0.2)(conv3)
+    conv3 = Conv2D(128, (3, 3), activation='relu', padding='same', data_format='channels_first')(conv3)
+    out1 = side_branch2(conv3, 4)
+    print("conv3 = ", conv3.shape, "out1", out1.shape)
+    #
+    # up1 = UpSampling2D(size=(2, 2), data_format='channels_first')(conv3)
+    up1 = Reshape((32, 24, 24))(conv3)
+    up1 = concatenate([conv2, up1], axis=1)
+    conv4 = Conv2D(64, (3, 3), activation='relu', padding='same', data_format='channels_first')(up1)
+    conv4 = Dropout(0.2)(conv4)
+    conv4 = Conv2D(64, (3, 3), activation='relu', padding='same', data_format='channels_first')(conv4)
+    out2 = side_branch2(conv4, 2)
+    print("up1 = ", up1.shape, "conv4 = ", conv4.shape, "out2 = ", out2.shape)
+    #
+    up2 = Reshape((16, 48, 48))(conv4)
+    # up2 = UpSampling2D(size=(2, 2), data_format='channels_first')(conv4)
     up2 = concatenate([conv1, up2], axis=1)
     conv5 = Conv2D(32, (3, 3), activation='relu', padding='same', data_format='channels_first')(up2)
     conv5 = Dropout(0.2)(conv5)
@@ -762,6 +1014,7 @@ def get_unet5(n_ch, patch_height, patch_width):
 
 def get_unet_br(n_ch, patch_height, patch_width):
     print("=====Using unet_br (the output for br)=====")
+    loss_w = get_lossweight()
     inputs = Input(shape=(n_ch, patch_height, patch_width))
     conv1 = Conv2D(32, (3, 3), activation='relu', padding='same', data_format='channels_first')(inputs)
     conv1 = Dropout(0.2)(conv1)
@@ -1608,97 +1861,6 @@ def get_dianet3(n_ch, patch_height, patch_width):
     return model
 
 
-# def get_hed(n_ch, patch_height, patch_width):
-#     print("=====Using hed net=====")
-#
-#     img_input = Input(shape=(n_ch, patch_height, patch_width), name='input')
-#     # Block 1
-#     x = Conv2D(64, (3, 3), activation='relu', padding='same', data_format='channels_first', name='block1_conv1')(
-#         img_input)
-#     print(x.name, x.shape, end="  ")
-#     x = Conv2D(64, (3, 3), activation='relu', padding='same', data_format='channels_first', name='block1_conv2')(x)
-#     print(x.name, x.shape, end="  ")
-#     b1 = side_branch(x, 1)  # 480 480 1
-#     x = MaxPooling2D((2, 2), strides=(2, 2), padding='same', data_format='channels_first', name='block1_pool')(
-#         x)  # 240 240 64
-#     print(x.name, x.shape)
-#
-#     # Block 2
-#     x = Conv2D(128, (3, 3), activation='relu', padding='same', data_format='channels_first', name='block2_conv1')(x)
-#     print(x.name, x.shape, end="  ")
-#     x = Conv2D(128, (3, 3), activation='relu', padding='same', data_format='channels_first', name='block2_conv2')(x)
-#     print(x.name, x.shape, end="  ")
-#     b2 = side_branch(x, 2)  # 480 480 1
-#     x = MaxPooling2D((2, 2), strides=(2, 2), padding='same', data_format='channels_first', name='block2_pool')(
-#         x)  # 120 120 128
-#     print(x.name, x.shape)
-#
-#     # Block 3
-#     x = Conv2D(256, (3, 3), activation='relu', padding='same', data_format='channels_first', name='block3_conv1')(x)
-#     print(x.name, x.shape, end="  ")
-#     x = Conv2D(256, (3, 3), activation='relu', padding='same', data_format='channels_first', name='block3_conv2')(x)
-#     print(x.name, x.shape, end="  ")
-#     x = Conv2D(256, (3, 3), activation='relu', padding='same', data_format='channels_first', name='block3_conv3')(x)
-#     print(x.name, x.shape, end="  ")
-#     b3 = side_branch(x, 4)  # 480 480 1
-#     x = MaxPooling2D((2, 2), strides=(2, 2), padding='same', data_format='channels_first', name='block3_pool')(
-#         x)  # 60 60 256
-#     print(x.name, x.shape)
-#
-#     # Block 4
-#     x = Conv2D(512, (3, 3), activation='relu', padding='same', data_format='channels_first', name='block4_conv1')(x)
-#     print(x.name, x.shape, end="  ")
-#     x = Conv2D(512, (3, 3), activation='relu', padding='same', data_format='channels_first', name='block4_conv2')(x)
-#     print(x.name, x.shape, end="  ")
-#     x = Conv2D(512, (3, 3), activation='relu', padding='same', data_format='channels_first', name='block4_conv3')(x)
-#     print(x.name, x.shape, end="  ")
-#     b4 = side_branch(x, 8)  # 480 480 1
-#     x = MaxPooling2D((2, 2), strides=(2, 2), padding='same', data_format='channels_first', name='block4_pool')(
-#         x)  # 30 30 512
-#     print(x.name, x.shape)
-#
-#     # Block 5
-#     x = Conv2D(512, (3, 3), activation='relu', padding='same', data_format='channels_first', name='block5_conv1')(x)
-#     print(x.name, x.shape, end="  ")
-#     x = Conv2D(512, (3, 3), activation='relu', padding='same', data_format='channels_first', name='block5_conv2')(x)
-#     print(x.name, x.shape, end="  ")
-#     x = Conv2D(512, (3, 3), activation='relu', padding='same', data_format='channels_first', name='block5_conv3')(
-#         x)  # 30 30 512
-#     print(x.name, x.shape)
-#     b5 = side_branch(x, 16)  # 480 480 1
-#
-#     # fuse
-#     fuse = Concatenate(axis=1)([b1, b2, b3, b4, b5])
-#     fuse = Conv2D(1, (1, 1), padding='same', use_bias=False, activation=None, data_format='channels_first')(
-#         fuse)  # 480 480 1
-#
-#     # outputs
-#     activ = "sigmoid"
-#     o1 = Activation(activ, name='o1')(b1)
-#     o2 = Activation(activ, name='o2')(b2)
-#     o3 = Activation(activ, name='o3')(b3)
-#     o4 = Activation(activ, name='o4')(b4)
-#     o5 = Activation(activ, name='o5')(b5)
-#     ofuse = Activation(activ, name='ofuse')(fuse)
-#
-#     # model
-#     model = Model(inputs=[img_input], outputs=[o1, o2, o3, o4, o5, ofuse])
-#     # model = Model(inputs = [img_input], outputs=[ofuse])
-#     # filepath = './models/vgg16_weights_tf_dim_ordering_tf_kernels_notop.h5'
-#     # load_weights_from_hdf5_group_by_name(model, filepath)
-#
-#     model.compile(loss={'o1': cross_entropy_balanced,
-#                         'o2': cross_entropy_balanced,
-#                         'o3': cross_entropy_balanced,
-#                         'o4': cross_entropy_balanced,
-#                         'o5': cross_entropy_balanced,
-#                         'ofuse': cross_entropy_balanced,
-#                         },
-#                   metrics={'ofuse': ofuse_pixel_error},
-#                   optimizer='adam')
-#
-#     return model
-
 def get_hed(n_ch, patch_height, patch_width):
     print("=====Using hed net=====")
 
@@ -1732,10 +1894,34 @@ def get_hed(n_ch, patch_height, patch_width):
     x = Conv2D(256, (3, 3), activation='relu', padding='same', data_format='channels_first', name='block3_conv3')(x)
     print(x.name, x.shape, end="  ")
     b3 = side_branch(x, 4)  # 480 480 1
+    x = MaxPooling2D((2, 2), strides=(2, 2), padding='same', data_format='channels_first', name='block3_pool')(
+        x)  # 60 60 256
     print(x.name, x.shape)
 
+    # Block 4
+    x = Conv2D(512, (3, 3), activation='relu', padding='same', data_format='channels_first', name='block4_conv1')(x)
+    print(x.name, x.shape, end="  ")
+    x = Conv2D(512, (3, 3), activation='relu', padding='same', data_format='channels_first', name='block4_conv2')(x)
+    print(x.name, x.shape, end="  ")
+    x = Conv2D(512, (3, 3), activation='relu', padding='same', data_format='channels_first', name='block4_conv3')(x)
+    print(x.name, x.shape, end="  ")
+    b4 = side_branch(x, 8)  # 480 480 1
+    x = MaxPooling2D((2, 2), strides=(2, 2), padding='same', data_format='channels_first', name='block4_pool')(
+        x)  # 30 30 512
+    print(x.name, x.shape)
+
+    # Block 5
+    x = Conv2D(512, (3, 3), activation='relu', padding='same', data_format='channels_first', name='block5_conv1')(x)
+    print(x.name, x.shape, end="  ")
+    x = Conv2D(512, (3, 3), activation='relu', padding='same', data_format='channels_first', name='block5_conv2')(x)
+    print(x.name, x.shape, end="  ")
+    x = Conv2D(512, (3, 3), activation='relu', padding='same', data_format='channels_first', name='block5_conv3')(
+        x)  # 30 30 512
+    print(x.name, x.shape)
+    b5 = side_branch(x, 16)  # 480 480 1
+
     # fuse
-    fuse = Concatenate(axis=1)([b1, b2, b3])
+    fuse = Concatenate(axis=1)([b1, b2, b3, b4, b5])
     fuse = Conv2D(1, (1, 1), padding='same', use_bias=False, activation=None, data_format='channels_first')(
         fuse)  # 480 480 1
 
@@ -1744,10 +1930,12 @@ def get_hed(n_ch, patch_height, patch_width):
     o1 = Activation(activ, name='o1')(b1)
     o2 = Activation(activ, name='o2')(b2)
     o3 = Activation(activ, name='o3')(b3)
+    o4 = Activation(activ, name='o4')(b4)
+    o5 = Activation(activ, name='o5')(b5)
     ofuse = Activation(activ, name='ofuse')(fuse)
 
     # model
-    model = Model(inputs=[img_input], outputs=[o1, o2, o3, ofuse])
+    model = Model(inputs=[img_input], outputs=[o1, o2, o3, o4, o5, ofuse])
     # model = Model(inputs = [img_input], outputs=[ofuse])
     # filepath = './models/vgg16_weights_tf_dim_ordering_tf_kernels_notop.h5'
     # load_weights_from_hdf5_group_by_name(model, filepath)
@@ -1755,12 +1943,77 @@ def get_hed(n_ch, patch_height, patch_width):
     model.compile(loss={'o1': cross_entropy_balanced,
                         'o2': cross_entropy_balanced,
                         'o3': cross_entropy_balanced,
+                        'o4': cross_entropy_balanced,
+                        'o5': cross_entropy_balanced,
                         'ofuse': cross_entropy_balanced,
                         },
                   metrics={'ofuse': ofuse_pixel_error},
                   optimizer='adam')
 
     return model
+
+
+# def get_hed(n_ch, patch_height, patch_width):
+#     print("=====Using hed net=====")
+#
+#     img_input = Input(shape=(n_ch, patch_height, patch_width), name='input')
+#     # Block 1
+#     x = Conv2D(64, (3, 3), activation='relu', padding='same', data_format='channels_first', name='block1_conv1')(
+#         img_input)
+#     print(x.name, x.shape, end="  ")
+#     x = Conv2D(64, (3, 3), activation='relu', padding='same', data_format='channels_first', name='block1_conv2')(x)
+#     print(x.name, x.shape, end="  ")
+#     b1 = side_branch(x, 1)  # 480 480 1
+#     x = MaxPooling2D((2, 2), strides=(2, 2), padding='same', data_format='channels_first', name='block1_pool')(
+#         x)  # 240 240 64
+#     print(x.name, x.shape)
+#
+#     # Block 2
+#     x = Conv2D(128, (3, 3), activation='relu', padding='same', data_format='channels_first', name='block2_conv1')(x)
+#     print(x.name, x.shape, end="  ")
+#     x = Conv2D(128, (3, 3), activation='relu', padding='same', data_format='channels_first', name='block2_conv2')(x)
+#     print(x.name, x.shape, end="  ")
+#     b2 = side_branch(x, 2)  # 480 480 1
+#     x = MaxPooling2D((2, 2), strides=(2, 2), padding='same', data_format='channels_first', name='block2_pool')(
+#         x)  # 120 120 128
+#     print(x.name, x.shape)
+#
+#     # Block 3
+#     x = Conv2D(256, (3, 3), activation='relu', padding='same', data_format='channels_first', name='block3_conv1')(x)
+#     print(x.name, x.shape, end="  ")
+#     x = Conv2D(256, (3, 3), activation='relu', padding='same', data_format='channels_first', name='block3_conv2')(x)
+#     print(x.name, x.shape, end="  ")
+#     x = Conv2D(256, (3, 3), activation='relu', padding='same', data_format='channels_first', name='block3_conv3')(x)
+#     print(x.name, x.shape, end="  ")
+#     b3 = side_branch(x, 4)  # 480 480 1
+#     print(x.name, x.shape)
+#
+#     # fuse
+#     fuse = Concatenate(axis=1)([b1, b2, b3])
+#     fuse = Conv2D(1, (1, 1), padding='same', use_bias=False, activation=None, data_format='channels_first')(
+#         fuse)  # 480 480 1
+#
+#     # outputs
+#     activ = "sigmoid"
+#     o1 = Activation(activ, name='o1')(b1)
+#     o2 = Activation(activ, name='o2')(b2)
+#     o3 = Activation(activ, name='o3')(b3)
+#     ofuse = Activation(activ, name='ofuse')(fuse)
+#
+#     # model
+#     model = Model(inputs=[img_input], outputs=[o1, o2, o3, ofuse])
+#     # model = Model(inputs = [img_input], outputs=[ofuse])
+#     # filepath = './models/vgg16_weights_tf_dim_ordering_tf_kernels_notop.h5'
+#     # load_weights_from_hdf5_group_by_name(model, filepath)
+#
+#     model.compile(loss={'o1': cross_entropy_balanced,
+#                         'o2': cross_entropy_balanced,
+#                         'o3': cross_entropy_balanced,
+#                         'ofuse': cross_entropy_balanced,},
+#                   metrics={'ofuse': ofuse_pixel_error},
+#                   optimizer='adam')
+#
+#     return model
 
 
 def get_hed2(n_ch, patch_height, patch_width):
@@ -1869,20 +2122,34 @@ def get_hed3(n_ch, patch_height, patch_width):
     return model
 
 
-def get_test(n_ch, patch_height, patch_width):
-    print("=====Using unet_br (softmax)=====")
+def get_demo(n_ch, patch_height, patch_width):
+    sys.path.insert(0, './CRF/')
+    from crfrnn_layer import CrfRnnLayer
+    print("=====Using test_net=====")
     inputs = Input(shape=(n_ch, patch_height, patch_width))
-    conv1 = Conv2D(2, (3, 3), activation='relu', padding='same', data_format='channels_first')(inputs)
+    conv1 = Conv2D(1, (3, 3), activation='relu', padding='same', data_format='channels_first')(inputs)
     print("conv1 = ", conv1.shape)
-    conv1 = Boundary_Refinement(conv1)
 
-    model = Model(inputs=[inputs], outputs=conv1)
+    conv1 = core.Permute((2, 3, 1))(conv1)
+    input = core.Permute((2, 3, 1))(inputs)
+    # print(conv1.max)
+
+    fuse = CrfRnnLayer(image_dims=(patch_height, patch_width),
+                       num_classes=2,
+                       theta_alpha=160.,
+                       theta_beta=3.,
+                       theta_gamma=3.,
+                       num_iterations=10,
+                       name='crfrnn')([conv1, input])
+    # print(fuse.max())
+    fuse = core.Permute((3, 1, 2))(fuse)
+
+    model = Model(inputs=[inputs], outputs=fuse)
     loss = cross_entropy_balanced
     model.compile(optimizer='sgd', loss=loss, metrics=['accuracy'])
 
     return model
 
-# # # #
-# model = get_hed(1, 48, 48)
+# model = get_demo(1, 488, 488)
 # print("Check: final output of the network:")
 # print(model.output_shape)
