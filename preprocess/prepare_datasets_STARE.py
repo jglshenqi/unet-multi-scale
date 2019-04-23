@@ -47,8 +47,8 @@ def prepare_data(urls_original, urls_save):
     for i in range(urls_original.__len__()):
         start_time = time.time()
         img = get_datasets(urls_original[i])
-        if np.max(img)==1:
-            img = img*255
+        if np.max(img) == 1:
+            img = img * 255
         print("the out is：", np.shape(img), np.max(img), np.min(img))
         print(time.time() - start_time)
 
@@ -57,7 +57,7 @@ def prepare_data(urls_original, urls_save):
 
 
 def example(dataset):
-    root = './temp/' + dataset
+    root = './temp2/' + dataset
     dataset_path = root + "_datasets_training_testing/"
     if not os.path.exists(dataset_path):
         os.makedirs(dataset_path)
@@ -96,8 +96,9 @@ def example(dataset):
     # prepare_data(url_original, url_save)
 
 
-# # prepare_data(["./shenqi/"], ["./HRF/1.hdf5"])
-dataset = 'CHASEDB1'
-example(dataset)
+if __name__ == '__main__':
+    # # prepare_data(["./shenqi/"], ["./HRF/1.hdf5"])
+    dataset = 'CHASEDB1'
+    example(dataset)
 
-# prepare_data(["./shenqi/"], ["./shenqi/1.hdf5"])
+    # prepare_data(["./shenqi/"], ["./shenqi/1.hdf5"])

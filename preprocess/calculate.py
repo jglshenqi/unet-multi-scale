@@ -13,7 +13,7 @@ def load_hdf5(infile):
 #         return f["image"][()]
 
 def cal_mean_var(dataset):
-    url = "./temp/DRIVE_datasets_training_testing/DRIVE_dataset_imgs_test.hdf5".replace('DRIVE', dataset)
+    url = "./temp2/DRIVE_datasets_training_testing/DRIVE_dataset_imgs_train.hdf5".replace('DRIVE', dataset)
     image = load_hdf5(url)
     print(image.shape)
 
@@ -32,4 +32,4 @@ def cal_mean_var(dataset):
 
 
 if __name__ == '__main__':
-    cal_mean_var('DRIVE')
+    cal_mean_var('CHASEDB1')

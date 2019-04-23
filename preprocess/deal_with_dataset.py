@@ -2,6 +2,7 @@ import os
 from help_functions import *
 import scipy.misc as misc
 from PIL import Image as Image
+import time
 
 
 def load_hdf5(infile):
@@ -103,15 +104,15 @@ def for_test(url):
         img = misc.imread(img_url)
         img = np.array(img)
         print(img_url, img.shape)
-        # img = Image.fromarray(img)
-        # img.save(img_url.replace('gif','png'))
+        img = Image.fromarray(img)
+        img.save(img_url.replace('gif', 'png'))
 
 
 def rename(url):
     path, name = read(url)
     for i in range(len(path)):
         img_url = path[i] + "/" + name[i]
-        os.rename(img_url, img_url.replace("_manual1", "").replace("shenqi_Prediction_","").replace("_test",""))
+        os.rename(img_url, img_url.replace("_manual1", "").replace("shenqi_Prediction_", "").replace("_test", ""))
         print(img_url)
 
 
@@ -140,13 +141,27 @@ def change_format(url):
             os.remove(img_url)
 
 
-if __name__ == '__main__':
-    dataset = 'IOSTAR'
+def for_test3():
+    now = time.time()
+    # print(now)
+    x = load_hdf5('./temp/HRF/br/temp.hdf5')
+    # print(np.shape(x))
+    print(str(time.time() - now))
+    now = time.time()
+    x = load_hdf5("./temp/HRF/br/temp.hdf5")
+    print(str(time.time() - now))
+    x = np.zeros(shape=(150000, 128, 128))
+    save_node(x, "./temp/1.pickle")
+    # save_node(x[0], "./temp/2.pickle")
 
-    size = [512, 512]
-    # url = "./temp/" + dataset
-    # url = './temp'
-    # resize(url, size)
+
+if __name__ == '__main__':
+    dataset = 'CHASEDB1'
+
+    size = [ 960,960]
+    url = "./temp2/" + dataset
+    # url = './temp2'
+    resize(url, size)
 
     # change_format('./temp/' + dataset)
 
@@ -158,9 +173,10 @@ if __name__ == '__main__':
     # url = "./temp/" + dataset + "_datasets_training_testing/" + dataset + '_dataset_imgs_'
     # cal_mean(url)
 
-    url = "./temp/"
-    rename(url)
+    # url = "./temp/"
+    # rename(url)
 
     # max_255()
     # for_test("./temp/" + dataset)
     # for_test2()
+    # for_test3()

@@ -79,11 +79,12 @@ def read_hdf5(url):
 
 
 if __name__ == '__main__':
-    dataset = "DRIVE"
-    path_data = './temp/DRIVE_datasets_training_testing/'.replace("DRIVE", dataset)
+    dataset = "CHASEDB1"
+    path_data = '../dataset/DRIVE/DRIVE_datasets_training_testing/'.replace("DRIVE", dataset)
+    # path_data = './temp2/DRIVE_datasets_training_testing/'.replace("DRIVE", dataset)
     n_subings = 20000
-    save_url = path_data + "train_patch128_20000.pickle"
-    patch_size = [128, 128]
+    patch_size = [128,128]
+    save_url = path_data + "train_patch" + str(patch_size[0]) + "_" + str(n_subings) + ".pickle"
 
     get_data_training(
         DRIVE_train_mask=path_data + 'DRIVE_dataset_borderMasks_train.hdf5'.replace("DRIVE", dataset),
