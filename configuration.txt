@@ -1,28 +1,47 @@
+[pre configs]
+training_file = ./src/retinaNN_training.py
+num_for_training = 1
+training = True
+train_nohup = False
+testing = True
+test_nohup = False
+
+[experiment name]
+name = shenqi
+
 [data paths]
-path_local = ./dataset/DRIVE_datasets_training_testing/
+path_local = ./dataset/DRIVE/DRIVE_datasets_training_testing/
+#path_local = ./preprocess/temp2/DRIVE_datasets_training_testing/
 train_imgs_original = DRIVE_dataset_imgs_train.hdf5
 train_groundTruth = DRIVE_dataset_groundTruth_train.hdf5
 train_border_masks = DRIVE_dataset_borderMasks_train.hdf5
 test_imgs_original = DRIVE_dataset_imgs_test.hdf5
 test_groundTruth = DRIVE_dataset_groundTruth_test.hdf5
 test_border_masks = DRIVE_dataset_borderMasks_test.hdf5
-train_coordinate = train_patch200.pickle
-
-[experiment name]
-name = shenqi
+train_coordinate = train_patch48_200.pickle
+train_patches = train_patch48_200.hdf5
+groundtruth_patches = groundtruth_patch48_200.hdf5
+#train_patch_url = train_patch_48_200
 
 [data attributes]
 #Dimensions of the patches extracted from the full images
 patch_height = 48
 patch_width = 48
-
+N_sampling = 200
+stride_height = 5
+stride_width = 5
 
 [training settings]
 #Number of training epochs
-N_epochs = 10
+N_epochs = 8
 batch_size = 32
 #if running with nohup
-nohup = False
+# training_format:0, input patch,out put center point[0,1];1:input patch，output patch; 2:input fullimages, output fullimages
+training_format = 1
+# num_of_loss : output loss
+num_of_loss = 1
+# softmax_index: whether output apply softmax
+softmax_index = 0
 
 [testing settings]
 #Choose the model to test: best==epoch with min loss, last==last epoch
@@ -31,107 +50,56 @@ best_last = best
 #Compute average in the prediction, improve results but require more patches to be predicted
 average_mode = True
 #Only if average_mode==True. Stride for patch extraction, lower value require more patches to be predicted
-stride_height = 8
-stride_width = 8
 #if running with nohup
-nohup = False
 vi_threshold = 0
 
 [public]
-network = unet3
-net_config = unet3
+network_file = pcm_vessel
+network = get_net1
+defalt_parameter = 0
+net_config = demo
 dataset = DRIVE
-num_of_classes = 2
 GPU = 0
-color_channel = 1
 
-loss_weight_0 = 1
-loss_weight_1 = 1
-loss_weight_2 = 1
-loss_weight_3 = 1
 
 [DRIVE]
+full_images_to_train = 20
 full_images_to_test = 20
 dataset_mean = 79.0913675900109
 dataset_std = 70.2044150585992
-#80.29942043480018 71.45527706959761
-part = 1
+# 80.29942043480018 71.45527706959761
 [HRF]
-full_images_to_test = 480
+full_images_to_train = 30
+full_images_to_test = 15
 dataset_mean = 80.83841938578134
 dataset_std = 76.43214153089184
-#73.96415703210248 69.42939979481052
-part = 5
+# 73.96415703210248 69.42939979481052
 [STARE]
+full_images_to_train = 15
 full_images_to_test = 5
 dataset_mean = 88.87445656565657
 dataset_std = 79.9109845542935
-#85.65102573789846 75.41881540962333
-part = 1
+# 85.65102573789846 75.41881540962333
 [CHASEDB1]
-full_images_to_test = 56
-dataset_mean = 57.2248614789102
-#52.49406625751503
-dataset_std = 57.2248614789102
-#72.00902661330645
-part = 2
+full_images_to_train = 20
+full_images_to_test = 8
+dataset_mean = 53.620174427900125
+dataset_std = 71.41812373568669
+[IOSTAR]
+full_images_to_train = 20
+full_images_to_test = 10
+dataset_mean = 63.05005559921265
+# 63.28976767857869
+dataset_std = 65.3307375027613
+# 65.82407300310864
 
-#training_format:0, input patch,out put center point[0,1];1:input patch，output patch; 2:input fullimages, output fullimages
-#num_of_loss : output loss
+
+# training_format:0, input patch,out put center point[0,1];1:input patch，output patch; 2:input fullimages, output fullimages
+# num_of_loss : output loss
 # softmax_index: whether output apply softmax
-#mask_original
-#type_of_output: whether output is in the same shape
 
-[fcnet]
+[demo]
 training_format = 0
 num_of_loss = 1
-softmax_index = 1
-differ_output = 0
-
-[unet]
-training_format = 1
-num_of_loss = 1
-softmax_index  = 1
-differ_output = 0
-
-[hed]
-training_format = 1
-num_of_loss = 4
-softmax_index  = 0
-differ_output = 0
-
-[unet3]
-training_format = 1
-num_of_loss = 4
-softmax_index  = 1
-differ_output = 0
-
-[unet4]
-training_format = 1
-num_of_loss = 1
-softmax_index = 1
-differ_output = 0
-
-[unet5]
-training_format = 1
-num_of_loss = 3
-softmax_index = 1
-differ_output = 0
-
-[unet_dm]
-training_format = 1
-num_of_loss = 4
-softmax_index = 1
-differ_output = 1
-
-[unet5l]
-training_format = 1
-num_of_loss = 5
-softmax_index = 1
-differ_output = 0
-
-[unet6l]
-training_format = 1
-num_of_loss = 6
 softmax_index = 1
 differ_output = 0
